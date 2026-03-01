@@ -1,0 +1,87 @@
+name: Generate SDE Database
+
+on:
+  workflow_dispatch:
+    inputs:
+      ru_descriptions:
+        description: 'Fetch Russian descriptions from ESI (adds ~30 min)'
+        required: false
+        default: 'true'
+        type: boolean
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y libyaml-dev
+
+      - name: Install dependencies
+        run: pip install pyyaml requests
+
+      - name: Get week number for cache key
+        id: date
+        run: echo "week=$(date +%Y-%W)" >> $GITHUB_OUTPUT
+
+      - name: Cache SDE download
+        uses: actions/cache@v4
+        id: sde-cache
+        with:
+          path: /tmp/sde.zip
+          key: sde-${{ steps.date.outputs.week }}
+
+      - name: Download SDE
+        if: steps.sde-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -L -o /tmp/sde.zip \
+            https://eve-static-data-export.s3-eu-west-1.amazonaws.com/tranquility/sde.zip
+
+      - name: Generate SQLite database
+        run: |
+          RU_FLAG=""
+          if [ "${{ inputs.ru_descriptions }}" = "true" ]; then
+            RU_FLAG="--ru-descriptions"
+          fi
+          python3 generate_sde.py \
+            --sde-zip /tmp/sde.zip \
+            --out item_db_en.sqlite \
+            $RU_FLAG \
+            --workers 20
+
+      - name: Get build number from DB
+        id: sde_version
+        run: |
+          BUILD=$(python3 -c "import sqlite3; c=sqlite3.connect('item_db_en.sqlite'); print(c.execute('SELECT build_number FROM version_info LIMIT 1').fetchone()[0])")
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
+          echo "SDE build: $BUILD"
+
+      - name: Compress database
+        run: gzip -9 -k item_db_en.sqlite
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sde-${{ steps.sde_version.outputs.build }}
+          name: SDE ${{ steps.sde_version.outputs.build }}
+          body: |
+            EVE SDE database build ${{ steps.sde_version.outputs.build }}
+
+            Generated from CCP Static Data Export on ${{ github.run_id }}
+          files: item_db_en.sqlite.gz
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
