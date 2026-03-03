@@ -20,6 +20,7 @@ Requirements:
 import argparse
 import json
 import os
+import pickle
 import sqlite3
 import sys
 import time
@@ -92,6 +93,34 @@ def extract_sde(zip_path: str, extract_dir: str):
 def load_yaml(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return yaml.load(f, Loader=YamlLoader)
+
+
+def load_fsd_strings(sde_dir: str) -> dict:
+    """Load English string lookup from EVE SDE localization pickle (nameID -> text)."""
+    pickle_path = os.path.join(sde_dir, "fsd", "localization_fsd_en-us.pickle")
+    if not os.path.exists(pickle_path):
+        log("  localization_fsd_en-us.pickle not found — nameID refs will resolve as empty")
+        return {}
+    try:
+        with open(pickle_path, "rb") as f:
+            data = pickle.load(f)
+        result = {}
+        for k, v in data.items():
+            try:
+                if isinstance(v, dict):
+                    text = v.get("text") or v.get("en") or ""
+                elif isinstance(v, str):
+                    text = v
+                else:
+                    continue
+                result[int(k)] = text
+            except (TypeError, ValueError):
+                pass
+        log(f"  Loaded {len(result)} localization strings")
+        return result
+    except Exception as e:
+        log(f"  Warning: could not load localization pickle: {e}")
+        return {}
 
 
 def fsd_path(sde_dir: str, *names: str) -> str:
@@ -541,7 +570,7 @@ def insert_groups(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(rows)} groups")
 
 
-def insert_meta_groups(conn: sqlite3.Connection, sde_dir: str):
+def insert_meta_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: dict):
     path = fsd_path(sde_dir, "metaGroups.yaml")
     if not os.path.exists(path):
         return
@@ -550,27 +579,51 @@ def insert_meta_groups(conn: sqlite3.Connection, sde_dir: str):
     rows = []
     for mg_id, entry in data.items():
         names = multiname(entry)
-        rows.append((int(mg_id), names.get("en") or names.get("en")))
+        name = names.get("en") or names.get("de") or ""
+        if not name:
+            name_id = entry.get("nameID")
+            if name_id:
+                name = fsd_strings.get(int(name_id), "")
+        rows.append((int(mg_id), name))
     conn.executemany("INSERT OR REPLACE INTO metaGroups VALUES (?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} metaGroups")
 
 
-def insert_market_groups(conn: sqlite3.Connection, sde_dir: str):
-    path = fsd_path(sde_dir, "marketGroups.yaml")
-    if not os.path.exists(path):
+def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: dict):
+    fsd_mg_path = fsd_path(sde_dir, "marketGroups.yaml")
+    bsd_mg_path = os.path.join(sde_dir, "bsd", "invMarketGroups.yaml")
+
+    if not os.path.exists(fsd_mg_path):
         log("SKIP: fsd/marketGroups.yaml not found")
         return
     log("Inserting marketGroups...")
-    data = load_yaml(path)
+
+    bsd_names: dict[int, str] = {}
+    if os.path.exists(bsd_mg_path):
+        for entry in load_yaml(bsd_mg_path):
+            gid = entry.get("marketGroupID")
+            n = entry.get("marketGroupName") or entry.get("nameID") or ""
+            if gid and n:
+                bsd_names[int(gid)] = str(n)
+        log(f"  bsd/invMarketGroups.yaml: {len(bsd_names)} name entries")
+
+    data = load_yaml(fsd_mg_path)
     rows = []
     for grp_id, entry in data.items():
+        gid = int(grp_id)
         names = multiname(entry)
         name = names.get("en") or names.get("de") or names.get("zh") or ""
+        if not name:
+            name_id = entry.get("nameID")
+            if name_id:
+                name = fsd_strings.get(int(name_id), "")
+        if not name:
+            name = bsd_names.get(gid, "")
         icon_id = entry.get("iconID")
         icon_name = str(icon_id) if icon_id else ""
         parent_id = entry.get("parentGroupID")
-        rows.append((int(grp_id), name, icon_name, parent_id, 1))
+        rows.append((gid, name, icon_name, parent_id, 1))
     conn.executemany(
         "INSERT OR REPLACE INTO marketGroups VALUES (?,?,?,?,?)",
         rows
@@ -1313,10 +1366,11 @@ def main():
 
     t0 = time.time()
     create_schema(conn)
+    fsd_strings = load_fsd_strings(sde_dir)
     insert_categories(conn, sde_dir)
     insert_groups(conn, sde_dir)
-    insert_meta_groups(conn, sde_dir)
-    insert_market_groups(conn, sde_dir)
+    insert_meta_groups(conn, sde_dir, fsd_strings)
+    insert_market_groups(conn, sde_dir, fsd_strings)
     insert_types(conn, sde_dir)
     insert_dogma_attributes(conn, sde_dir)
     insert_dogma_effects(conn, sde_dir)
