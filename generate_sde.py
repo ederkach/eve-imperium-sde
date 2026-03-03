@@ -619,9 +619,10 @@ def insert_groups(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict):
             bool(entry.get("published", False)),
             bool(entry.get("useBasePrice", False)),
             icon_name,
+            None,
         ))
     conn.executemany(
-        "INSERT OR REPLACE INTO groups VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO groups VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         rows
     )
     conn.commit()
@@ -695,9 +696,9 @@ def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: di
         icon_id = entry.get("iconID")
         icon_name = icon_filenames.get(int(icon_id), str(icon_id)) if icon_id else ""
         parent_id = entry.get("parentGroupID")
-        rows.append((gid, name, icon_name, parent_id, 1))
+        rows.append((gid, name, icon_name, parent_id, 1, None))
     conn.executemany(
-        "INSERT OR REPLACE INTO marketGroups VALUES (?,?,?,?,?)",
+        "INSERT OR REPLACE INTO marketGroups VALUES (?,?,?,?,?,?)",
         rows
     )
     conn.commit()
