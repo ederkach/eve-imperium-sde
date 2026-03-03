@@ -140,6 +140,25 @@ def multiname(entry, field="name") -> dict:
     return {"en": str(v)}
 
 
+def resolve_name_id(name_id, fsd_strings: dict) -> str:
+    """Resolve a nameID value to an English string.
+    nameID can be:
+      - an int  → look up in fsd_strings (localization pickle)
+      - a dict  → already a multilingual map, return entry for 'en'
+      - a str   → treat as literal name
+    """
+    if name_id is None:
+        return ""
+    if isinstance(name_id, dict):
+        return name_id.get("en") or name_id.get("de") or name_id.get("zh") or ""
+    if isinstance(name_id, str):
+        return name_id
+    try:
+        return fsd_strings.get(int(name_id), "")
+    except (TypeError, ValueError):
+        return ""
+
+
 def esi_get(url: str):
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "eve-imperium/sde-generator"})
@@ -581,9 +600,7 @@ def insert_meta_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: dict
         names = multiname(entry)
         name = names.get("en") or names.get("de") or ""
         if not name:
-            name_id = entry.get("nameID")
-            if name_id:
-                name = fsd_strings.get(int(name_id), "")
+            name = resolve_name_id(entry.get("nameID"), fsd_strings)
         rows.append((int(mg_id), name))
     conn.executemany("INSERT OR REPLACE INTO metaGroups VALUES (?,?)", rows)
     conn.commit()
@@ -615,9 +632,7 @@ def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: di
         names = multiname(entry)
         name = names.get("en") or names.get("de") or names.get("zh") or ""
         if not name:
-            name_id = entry.get("nameID")
-            if name_id:
-                name = fsd_strings.get(int(name_id), "")
+            name = resolve_name_id(entry.get("nameID"), fsd_strings)
         if not name:
             name = bsd_names.get(gid, "")
         icon_id = entry.get("iconID")
