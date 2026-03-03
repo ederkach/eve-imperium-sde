@@ -39,7 +39,7 @@ except ImportError:
     print("PyYAML not found. Install with: pip install pyyaml")
     sys.exit(1)
 
-SDE_URL = "https://eve-static-data-export.s3-eu-west-1.amazonaws.com/tranquility/sde.zip"
+SDE_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-yaml.zip"
 ESI_BASE = "https://esi.evetech.net/latest"
 DEFAULT_OUT = "composeApp/src/commonMain/composeResources/files/item_db_en.sqlite"
 
@@ -138,6 +138,32 @@ def multiname(entry, field="name") -> dict:
     if isinstance(v, dict):
         return v
     return {"en": str(v)}
+
+
+def load_icon_filenames(sde_dir: str) -> dict:
+    """Load iconID -> short filename from fsd/iconIDs.yaml.
+    Returns {iconID: "4_64_9"} (basename without path/extension).
+    """
+    path = fsd_path(sde_dir, "iconIDs.yaml")
+    if not os.path.exists(path):
+        return {}
+    try:
+        data = load_yaml(path)
+        result = {}
+        for icon_id, entry in data.items():
+            if not isinstance(entry, dict):
+                continue
+            icon_file = entry.get("iconFile") or ""
+            if icon_file:
+                basename = icon_file.split("/")[-1]
+                if basename.endswith(".png"):
+                    basename = basename[:-4]
+                result[int(icon_id)] = basename
+        log(f"  Loaded {len(result)} icon filenames from iconIDs.yaml")
+        return result
+    except Exception as e:
+        log(f"  Warning: could not load iconIDs.yaml: {e}")
+        return {}
 
 
 def resolve_name_id(name_id, fsd_strings: dict) -> str:
@@ -607,7 +633,7 @@ def insert_meta_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: dict
     log(f"  {len(rows)} metaGroups")
 
 
-def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: dict):
+def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: dict, icon_filenames: dict):
     fsd_mg_path = fsd_path(sde_dir, "marketGroups.yaml")
     bsd_mg_path = os.path.join(sde_dir, "bsd", "invMarketGroups.yaml")
 
@@ -636,7 +662,7 @@ def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: di
         if not name:
             name = bsd_names.get(gid, "")
         icon_id = entry.get("iconID")
-        icon_name = str(icon_id) if icon_id else ""
+        icon_name = icon_filenames.get(int(icon_id), str(icon_id)) if icon_id else ""
         parent_id = entry.get("parentGroupID")
         rows.append((gid, name, icon_name, parent_id, 1))
     conn.executemany(
@@ -1382,10 +1408,11 @@ def main():
     t0 = time.time()
     create_schema(conn)
     fsd_strings = load_fsd_strings(sde_dir)
+    icon_filenames = load_icon_filenames(sde_dir)
     insert_categories(conn, sde_dir)
     insert_groups(conn, sde_dir)
     insert_meta_groups(conn, sde_dir, fsd_strings)
-    insert_market_groups(conn, sde_dir, fsd_strings)
+    insert_market_groups(conn, sde_dir, fsd_strings, icon_filenames)
     insert_types(conn, sde_dir)
     insert_dogma_attributes(conn, sde_dir)
     insert_dogma_effects(conn, sde_dir)
