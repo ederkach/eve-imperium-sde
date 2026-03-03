@@ -566,7 +566,7 @@ def create_schema(conn: sqlite3.Connection):
     conn.commit()
 
 
-def insert_categories(conn: sqlite3.Connection, sde_dir: str):
+def insert_categories(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict):
     path = fsd_path(sde_dir, "categoryIDs.yaml", "categories.yaml")
     if not os.path.exists(path):
         log("SKIP: fsd/categoryIDs.yaml not found")
@@ -576,12 +576,14 @@ def insert_categories(conn: sqlite3.Connection, sde_dir: str):
     rows = []
     for cat_id, entry in data.items():
         names = multiname(entry)
+        icon_id = entry.get("iconID")
+        icon_name = icon_filenames.get(int(icon_id), str(icon_id)) if icon_id else ""
         rows.append((
             int(cat_id),
             names.get("en"), names.get("de"), names.get("en"),
             names.get("es"), names.get("fr"), names.get("ja"),
             names.get("ko"), names.get("ru"), names.get("zh"),
-            None, entry.get("iconID"), bool(entry.get("published", False)),
+            icon_name, entry.get("iconID"), bool(entry.get("published", False)),
         ))
     conn.executemany(
         "INSERT OR REPLACE INTO categories VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -591,7 +593,7 @@ def insert_categories(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(rows)} categories")
 
 
-def insert_groups(conn: sqlite3.Connection, sde_dir: str):
+def insert_groups(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict):
     path = fsd_path(sde_dir, "groupIDs.yaml", "groups.yaml")
     if not os.path.exists(path):
         log("SKIP: fsd/groupIDs.yaml not found")
@@ -601,6 +603,8 @@ def insert_groups(conn: sqlite3.Connection, sde_dir: str):
     rows = []
     for grp_id, entry in data.items():
         names = multiname(entry)
+        icon_id = entry.get("iconID")
+        icon_name = icon_filenames.get(int(icon_id), str(icon_id)) if icon_id else ""
         rows.append((
             int(grp_id),
             names.get("en"), names.get("de"), names.get("en"),
@@ -612,7 +616,7 @@ def insert_groups(conn: sqlite3.Connection, sde_dir: str):
             bool(entry.get("fittableNonSingleton", False)),
             bool(entry.get("published", False)),
             bool(entry.get("useBasePrice", False)),
-            None,
+            icon_name,
         ))
     conn.executemany(
         "INSERT OR REPLACE INTO groups VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -680,7 +684,7 @@ def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: di
     log(f"  {len(rows)} marketGroups")
 
 
-def insert_types(conn: sqlite3.Connection, sde_dir: str):
+def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = None):
     path = fsd_path(sde_dir, "typeIDs.yaml", "types.yaml")
     if not os.path.exists(path):
         log("SKIP: fsd/typeIDs.yaml not found")
@@ -720,7 +724,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str):
         gd = group_data.get(grp_id, {})
 
         icon_id = entry.get("iconID") or 0
-        icon_fn = f"type_{type_id}_64.png" if icon_id or names.get("en") else "type_default.png"
+        icon_fn = (icon_filenames or {}).get(int(icon_id), "") if icon_id else ""
 
         rows.append((
             type_id,
@@ -1440,11 +1444,11 @@ def main():
     create_schema(conn)
     fsd_strings = load_fsd_strings(sde_dir)
     icon_filenames = load_icon_filenames(sde_dir)
-    insert_categories(conn, sde_dir)
-    insert_groups(conn, sde_dir)
+    insert_categories(conn, sde_dir, icon_filenames)
+    insert_groups(conn, sde_dir, icon_filenames)
     insert_meta_groups(conn, sde_dir, fsd_strings)
     insert_market_groups(conn, sde_dir, fsd_strings, icon_filenames)
-    insert_types(conn, sde_dir)
+    insert_types(conn, sde_dir, icon_filenames)
     insert_dogma_attributes(conn, sde_dir)
     insert_dogma_effects(conn, sde_dir)
     insert_types_dogma(conn, sde_dir)
