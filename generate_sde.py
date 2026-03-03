@@ -1472,21 +1472,9 @@ def main():
     log(f"Done in {elapsed:.0f}s — {size_mb:.1f} MB → {out_path}")
 
     bundle_path = os.path.splitext(out_path)[0] + ".zip"
-    log(f"Creating bundle {bundle_path}")
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    icons_path = os.path.join(script_dir, "icons", "icons.zip")
+    log(f"Creating bundle {bundle_path} (SQLite only — icons bundled with app)")
     with zipfile.ZipFile(bundle_path, "w") as zf:
         zf.write(out_path, "item_db_en.sqlite", compress_type=zipfile.ZIP_DEFLATED)
-        if os.path.exists(icons_path):
-            with zipfile.ZipFile(icons_path, "r") as icons_zf:
-                count = 0
-                for entry in icons_zf.namelist():
-                    if not entry.endswith("/"):
-                        zf.writestr(entry, icons_zf.read(entry), compress_type=zipfile.ZIP_STORED)
-                        count += 1
-                log(f"Added {count} icon files to bundle")
-        else:
-            log("WARNING: icons/icons.zip not found, bundle will not contain icons")
     log(f"Bundle: {os.path.getsize(bundle_path) / 1024 / 1024:.1f} MB → {bundle_path}")
 
 
