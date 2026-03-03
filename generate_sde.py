@@ -97,7 +97,13 @@ def load_yaml(path: str):
 
 def load_fsd_strings(sde_dir: str) -> dict:
     """Load English string lookup from EVE SDE localization pickle (nameID -> text)."""
-    pickle_path = os.path.join(sde_dir, "fsd", "localization_fsd_en-us.pickle")
+    for subdir in ("fsd", ""):
+        candidate = os.path.join(sde_dir, subdir, "localization_fsd_en-us.pickle") if subdir else os.path.join(sde_dir, "localization_fsd_en-us.pickle")
+        if os.path.exists(candidate):
+            break
+    else:
+        candidate = os.path.join(sde_dir, "fsd", "localization_fsd_en-us.pickle")
+    pickle_path = candidate
     if not os.path.exists(pickle_path):
         log("  localization_fsd_en-us.pickle not found — nameID refs will resolve as empty")
         return {}
@@ -125,9 +131,10 @@ def load_fsd_strings(sde_dir: str) -> dict:
 
 def fsd_path(sde_dir: str, *names: str) -> str:
     for name in names:
-        p = os.path.join(sde_dir, "fsd", name)
-        if os.path.exists(p):
-            return p
+        for subdir in ("fsd", ""):
+            p = os.path.join(sde_dir, subdir, name) if subdir else os.path.join(sde_dir, name)
+            if os.path.exists(p):
+                return p
     return os.path.join(sde_dir, "fsd", names[0])
 
 
@@ -982,22 +989,42 @@ def insert_universe(conn: sqlite3.Connection, sde_dir: str):
 
 
 def insert_stations(conn: sqlite3.Connection, sde_dir: str):
-    path = os.path.join(sde_dir, "bsd", "staStations.yaml")
-    if not os.path.exists(path):
-        log("SKIP: bsd/staStations.yaml not found")
-        return
-    log("Inserting stations...")
-    data = load_yaml(path)
+    bsd_path = os.path.join(sde_dir, "bsd", "staStations.yaml")
+    npc_path = fsd_path(sde_dir, "npcStations.yaml")
     rows = []
-    for entry in data:
-        rows.append((
-            entry.get("stationID"),
-            entry.get("stationTypeID"),
-            entry.get("stationName"),
-            entry.get("regionID"),
-            entry.get("solarSystemID"),
-            entry.get("security"),
-        ))
+    if os.path.exists(bsd_path):
+        log("Inserting stations from bsd/staStations.yaml...")
+        data = load_yaml(bsd_path)
+        for entry in data:
+            rows.append((
+                entry.get("stationID"),
+                entry.get("stationTypeID"),
+                entry.get("stationName"),
+                entry.get("regionID"),
+                entry.get("solarSystemID"),
+                entry.get("security"),
+            ))
+    elif os.path.exists(npc_path):
+        log("Inserting stations from npcStations.yaml...")
+        data = load_yaml(npc_path)
+        type_names = {}
+        cur = conn.cursor()
+        cur.execute("SELECT type_id, en_name FROM types")
+        for r in cur.fetchall():
+            type_names[r[0]] = r[1]
+        for station_id, entry in data.items():
+            type_id = entry.get("typeID")
+            rows.append((
+                int(station_id),
+                type_id,
+                type_names.get(type_id),
+                None,
+                entry.get("solarSystemID"),
+                None,
+            ))
+    else:
+        log("SKIP: no stations file found")
+        return
     conn.executemany("INSERT OR REPLACE INTO stations VALUES (?,?,?,?,?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} stations")
@@ -1376,15 +1403,16 @@ def main():
 
         if not os.path.isdir(sde_dir):
             top = os.listdir(extract_dir)
-            log(f"Contents of {extract_dir}: {top}")
+            log(f"Contents of {extract_dir}: {top[:20]}")
             if len(top) == 1 and os.path.isdir(os.path.join(extract_dir, top[0])):
                 sde_dir = os.path.join(extract_dir, top[0])
                 log(f"Using {sde_dir} as SDE root")
-            else:
-                fsd = os.path.join(extract_dir, "fsd")
-                if os.path.isdir(fsd):
-                    sde_dir = extract_dir
-                    log(f"ZIP extracted flat, using {sde_dir} as SDE root")
+            elif os.path.isdir(os.path.join(extract_dir, "fsd")):
+                sde_dir = extract_dir
+                log(f"ZIP extracted flat with fsd/, using {sde_dir} as SDE root")
+            elif any(f.endswith(".yaml") for f in top):
+                sde_dir = extract_dir
+                log(f"ZIP extracted flat (no fsd/), using {sde_dir} as SDE root")
 
     if not os.path.isdir(sde_dir):
         print(f"ERROR: SDE directory not found: {sde_dir}")
@@ -1394,6 +1422,9 @@ def main():
     if os.path.isdir(fsd_dir):
         fsd_files = sorted(os.listdir(fsd_dir))
         log(f"fsd/ contents ({len(fsd_files)} files): {fsd_files[:30]}")
+    else:
+        root_files = sorted(f for f in os.listdir(sde_dir) if f.endswith(".yaml"))
+        log(f"SDE root YAML files ({len(root_files)}): {root_files[:30]}")
 
     out_path = args.out
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
