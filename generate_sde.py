@@ -227,7 +227,8 @@ def create_schema(conn: sqlite3.Connection):
             iconID INTEGER, categoryID INTEGER,
             anchorable BOOLEAN, anchored BOOLEAN,
             fittableNonSingleton BOOLEAN, published BOOLEAN,
-            useBasePrice BOOLEAN, icon_filename TEXT
+            useBasePrice BOOLEAN, icon_filename TEXT,
+            representative_type_id INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS metaGroups (
@@ -551,7 +552,8 @@ def create_schema(conn: sqlite3.Connection):
             name TEXT,
             icon_name TEXT,
             parentgroup_id INTEGER,
-            show INTEGER DEFAULT 1
+            show INTEGER DEFAULT 1,
+            representative_type_id INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS version_info (
@@ -624,6 +626,24 @@ def insert_groups(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict):
     )
     conn.commit()
     log(f"  {len(rows)} groups")
+
+
+def populate_representative_types(conn: sqlite3.Connection):
+    log("Populating representative_type_id for groups and marketGroups...")
+    conn.execute("""
+        UPDATE groups SET representative_type_id = (
+            SELECT MIN(type_id) FROM types
+            WHERE types.groupID = groups.group_id AND types.published = 1
+        )
+    """)
+    conn.execute("""
+        UPDATE marketGroups SET representative_type_id = (
+            SELECT MIN(t.type_id) FROM types t
+            WHERE t.marketGroupID = marketGroups.group_id AND t.published = 1
+        )
+    """)
+    conn.commit()
+    log("  Done.")
 
 
 def insert_meta_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: dict):
@@ -1449,6 +1469,7 @@ def main():
     insert_meta_groups(conn, sde_dir, fsd_strings)
     insert_market_groups(conn, sde_dir, fsd_strings, icon_filenames)
     insert_types(conn, sde_dir, icon_filenames)
+    populate_representative_types(conn)
     insert_dogma_attributes(conn, sde_dir)
     insert_dogma_effects(conn, sde_dir)
     insert_types_dogma(conn, sde_dir)
