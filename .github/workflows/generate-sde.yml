@@ -81,7 +81,9 @@ jobs:
             EVE SDE database build ${{ steps.sde_version.outputs.build }}
 
             Generated from CCP Static Data Export on ${{ github.run_id }}
-          files: item_db_en.sqlite.gz
+          files: |
+            item_db_en.sqlite.gz
+            icons/icons.zip
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

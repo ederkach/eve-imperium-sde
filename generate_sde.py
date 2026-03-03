@@ -148,10 +148,10 @@ def multiname(entry, field="name") -> dict:
 
 
 def load_icon_filenames(sde_dir: str) -> dict:
-    """Load iconID -> short filename from fsd/iconIDs.yaml.
+    """Load iconID -> short filename from iconIDs.yaml or icons.yaml.
     Returns {iconID: "4_64_9"} (basename without path/extension).
     """
-    path = fsd_path(sde_dir, "iconIDs.yaml")
+    path = fsd_path(sde_dir, "iconIDs.yaml", "icons.yaml")
     if not os.path.exists(path):
         return {}
     try:
