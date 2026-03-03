@@ -1478,8 +1478,13 @@ def main():
     with zipfile.ZipFile(bundle_path, "w") as zf:
         zf.write(out_path, "item_db_en.sqlite", compress_type=zipfile.ZIP_DEFLATED)
         if os.path.exists(icons_path):
-            zf.write(icons_path, "icons.zip", compress_type=zipfile.ZIP_STORED)
-            log(f"Added {os.path.getsize(icons_path) / 1024 / 1024:.1f} MB icons.zip to bundle")
+            with zipfile.ZipFile(icons_path, "r") as icons_zf:
+                count = 0
+                for entry in icons_zf.namelist():
+                    if not entry.endswith("/"):
+                        zf.writestr(entry, icons_zf.read(entry), compress_type=zipfile.ZIP_STORED)
+                        count += 1
+                log(f"Added {count} icon files to bundle")
         else:
             log("WARNING: icons/icons.zip not found, bundle will not contain icons")
     log(f"Bundle: {os.path.getsize(bundle_path) / 1024 / 1024:.1f} MB → {bundle_path}")
