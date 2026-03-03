@@ -65,12 +65,7 @@ jobs:
       - name: Get build number from DB
         id: sde_version
         run: |
-          BUILD=$(python3 -c "
-import sqlite3, time
-c = sqlite3.connect('item_db_en.sqlite')
-row = c.execute('SELECT build_number FROM version_info LIMIT 1').fetchone()
-print(row[0] if row and row[0] else int(time.time()))
-")
+          BUILD=$(python3 -c "import sqlite3, time; c=sqlite3.connect('item_db_en.sqlite'); row=c.execute('SELECT build_number FROM version_info LIMIT 1').fetchone(); print(row[0] if row and row[0] else int(time.time()))")
           echo "build=$BUILD" >> $GITHUB_OUTPUT
           echo "SDE build: $BUILD"
 
