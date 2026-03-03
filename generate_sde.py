@@ -465,6 +465,14 @@ def create_schema(conn: sqlite3.Connection):
             PRIMARY KEY (id, category, group_id)
         );
 
+        CREATE TABLE IF NOT EXISTS marketGroups (
+            group_id INTEGER NOT NULL PRIMARY KEY,
+            name TEXT,
+            icon_name TEXT,
+            parentgroup_id INTEGER,
+            show INTEGER DEFAULT 1
+        );
+
         CREATE TABLE IF NOT EXISTS version_info (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             build_number INTEGER NOT NULL,
@@ -546,6 +554,29 @@ def insert_meta_groups(conn: sqlite3.Connection, sde_dir: str):
     conn.executemany("INSERT OR REPLACE INTO metaGroups VALUES (?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} metaGroups")
+
+
+def insert_market_groups(conn: sqlite3.Connection, sde_dir: str):
+    path = fsd_path(sde_dir, "marketGroups.yaml")
+    if not os.path.exists(path):
+        log("SKIP: fsd/marketGroups.yaml not found")
+        return
+    log("Inserting marketGroups...")
+    data = load_yaml(path)
+    rows = []
+    for grp_id, entry in data.items():
+        names = multiname(entry)
+        name = names.get("en") or names.get("de") or names.get("zh") or ""
+        icon_id = entry.get("iconID")
+        icon_name = str(icon_id) if icon_id else ""
+        parent_id = entry.get("parentGroupID")
+        rows.append((int(grp_id), name, icon_name, parent_id, 1))
+    conn.executemany(
+        "INSERT OR REPLACE INTO marketGroups VALUES (?,?,?,?,?)",
+        rows
+    )
+    conn.commit()
+    log(f"  {len(rows)} marketGroups")
 
 
 def insert_types(conn: sqlite3.Connection, sde_dir: str):
@@ -1201,6 +1232,8 @@ def create_indexes(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_types_groupID ON types(groupID);
         CREATE INDEX IF NOT EXISTS idx_types_categoryID ON types(categoryID);
         CREATE INDEX IF NOT EXISTS idx_types_published ON types(published);
+        CREATE INDEX IF NOT EXISTS idx_types_marketGroupID ON types(marketGroupID);
+        CREATE INDEX IF NOT EXISTS idx_marketGroups_parentgroup_id ON marketGroups(parentgroup_id);
         CREATE INDEX IF NOT EXISTS idx_typeAttributes_type_id ON typeAttributes(type_id);
         CREATE INDEX IF NOT EXISTS idx_typeAttributes_attr_id ON typeAttributes(attribute_id);
         CREATE INDEX IF NOT EXISTS idx_typeSkillRequirement_typeid ON typeSkillRequirement(typeid);
@@ -1283,6 +1316,7 @@ def main():
     insert_categories(conn, sde_dir)
     insert_groups(conn, sde_dir)
     insert_meta_groups(conn, sde_dir)
+    insert_market_groups(conn, sde_dir)
     insert_types(conn, sde_dir)
     insert_dogma_attributes(conn, sde_dir)
     insert_dogma_effects(conn, sde_dir)
