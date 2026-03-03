@@ -69,9 +69,6 @@ jobs:
           echo "build=$BUILD" >> $GITHUB_OUTPUT
           echo "SDE build: $BUILD"
 
-      - name: Compress database
-        run: gzip -9 -k item_db_en.sqlite
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -82,8 +79,7 @@ jobs:
 
             Generated from CCP Static Data Export on ${{ github.run_id }}
           files: |
-            item_db_en.sqlite.gz
-            icons/icons.zip
+            item_db_en.zip
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1471,6 +1471,19 @@ def main():
     elapsed = time.time() - t0
     log(f"Done in {elapsed:.0f}s — {size_mb:.1f} MB → {out_path}")
 
+    bundle_path = os.path.splitext(out_path)[0] + ".zip"
+    log(f"Creating bundle {bundle_path}")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    icons_path = os.path.join(script_dir, "icons", "icons.zip")
+    with zipfile.ZipFile(bundle_path, "w") as zf:
+        zf.write(out_path, "item_db_en.sqlite", compress_type=zipfile.ZIP_DEFLATED)
+        if os.path.exists(icons_path):
+            zf.write(icons_path, "icons.zip", compress_type=zipfile.ZIP_STORED)
+            log(f"Added {os.path.getsize(icons_path) / 1024 / 1024:.1f} MB icons.zip to bundle")
+        else:
+            log("WARNING: icons/icons.zip not found, bundle will not contain icons")
+    log(f"Bundle: {os.path.getsize(bundle_path) / 1024 / 1024:.1f} MB → {bundle_path}")
+
 
 if __name__ == "__main__":
     main()
