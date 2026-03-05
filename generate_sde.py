@@ -792,7 +792,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
     log(f"  {len(data)} types inserted")
 
 
-def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str):
+def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict):
     path = fsd_path(sde_dir, "dogmaAttributes.yaml")
     if not os.path.exists(path):
         return
@@ -814,10 +814,13 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str):
         else:
             tooltip_str = None
 
+        icon_id = entry.get("iconID")
+        icon_fn = icon_filenames.get(int(icon_id), "") if icon_id else ""
+
         rows.append((
             int(attr_id),
             entry.get("categoryID"), entry.get("name"), display_name,
-            tooltip_str, entry.get("iconID"), None,
+            tooltip_str, icon_id, icon_fn,
             entry.get("unitID"),
             bool(entry.get("stackable", True)),
             bool(entry.get("highIsGood", True)),
@@ -1471,7 +1474,7 @@ def main():
     insert_market_groups(conn, sde_dir, fsd_strings, icon_filenames)
     insert_types(conn, sde_dir, icon_filenames)
     populate_representative_types(conn)
-    insert_dogma_attributes(conn, sde_dir)
+    insert_dogma_attributes(conn, sde_dir, icon_filenames)
     insert_dogma_effects(conn, sde_dir)
     insert_types_dogma(conn, sde_dir)
     insert_universe(conn, sde_dir)
