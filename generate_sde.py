@@ -792,6 +792,57 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
     log(f"  {len(data)} types inserted")
 
 
+DOGMA_ATTRIBUTE_CATEGORIES = [
+    (1, "Fitting", "Fitting capabilities of a ship"),
+    (2, "Shield", "Shield attributes of ships"),
+    (3, "Armor", "Armor attributes of ships"),
+    (4, "Structure", "Structure attributes of ships"),
+    (5, "Capacitor", "Capacitor attributes for ships"),
+    (6, "Targeting", "Targeting Attributes for ships"),
+    (7, "Miscellaneous", "Misc. attributes"),
+    (8, "Required Skills", "Skill requirements"),
+    (9, "NULL", "Attributes already checked and not going into a category"),
+    (10, "Drones", "All you need to know about drones"),
+    (12, "AI", "Attribs for the AI configuration"),
+    (17, "Speed and Travel", "Attributes used for velocity, speed and such"),
+    (19, "Loot", "Attributes that affect loot drops"),
+    (20, "Remote Assistance", "Remote shield transfers, armor, structure and such"),
+    (21, "EW - Target Painting", "NPC Target Painting Attributes"),
+    (22, "EW - Energy Neutralizing", "NPC Energy Neutralizing Attributes"),
+    (23, "EW - Remote Electronic Counter Measures", "NPC Remote Electronic Counter Measures Attributes"),
+    (24, "EW - Sensor Dampening", "NPC Sensor Dampening Attributes"),
+    (25, "EW - Target Jamming", "NPC Target Jamming Attributes"),
+    (26, "EW - Tracking Disruption", "NPC Tracking Disruption Attributes"),
+    (27, "EW - Warp Scrambling", "NPC Warp Scrambling Attributes"),
+    (28, "EW - Webbing", "NPC Stasis Webbing Attributes"),
+    (29, "Turrets", "NPC Turrets Attributes"),
+    (30, "Missile", "NPC Missile Attributes"),
+    (31, "Graphics", "NPC Graphic Attributes"),
+    (32, "Entity Rewards", "NPC Entity Rewards Attributes"),
+    (33, "Entity Extra Attributes", "NPC Extra Attributes"),
+    (34, "Fighter Abilities", "Fighter abilities are like built-in modules on fighters"),
+    (36, "EW - Resistance", "Resistances to different types of EWar Effects"),
+    (37, "Bonuses", "Bonuses"),
+    (38, "Fighter Attributes", "Attributes related to fighters (but not abilities)"),
+    (39, "Superweapons", "Attributes relating to Doomsdays and Superweapons"),
+    (40, "Hangars & Bays", "Hangars & Bays"),
+    (41, "On Death", "Attributes relating to the death of a ship"),
+    (42, "Behavior Attributes", "NPC Behavior Attributes"),
+    (51, "Mining", "Mining related attributes"),
+    (52, "Heat", ""),
+]
+
+
+def insert_dogma_attribute_categories(conn: sqlite3.Connection):
+    log("Inserting dogmaAttributeCategories...")
+    conn.executemany(
+        "INSERT OR REPLACE INTO dogmaAttributeCategories VALUES (?,?,?)",
+        DOGMA_ATTRIBUTE_CATEGORIES
+    )
+    conn.commit()
+    log(f"  {len(DOGMA_ATTRIBUTE_CATEGORIES)} dogmaAttributeCategories")
+
+
 def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict):
     path = fsd_path(sde_dir, "dogmaAttributes.yaml")
     if not os.path.exists(path):
@@ -1474,6 +1525,7 @@ def main():
     insert_market_groups(conn, sde_dir, fsd_strings, icon_filenames)
     insert_types(conn, sde_dir, icon_filenames)
     populate_representative_types(conn)
+    insert_dogma_attribute_categories(conn)
     insert_dogma_attributes(conn, sde_dir, icon_filenames)
     insert_dogma_effects(conn, sde_dir)
     insert_types_dogma(conn, sde_dir)
