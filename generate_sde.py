@@ -851,7 +851,7 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
     data = load_yaml(path)
     rows = []
     for attr_id, entry in data.items():
-        display = entry.get("displayNameID")
+        display = entry.get("displayName") or entry.get("displayNameID")
         if isinstance(display, dict):
             display_name = display.get("en") or entry.get("name")
         elif isinstance(display, str):
@@ -859,7 +859,7 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
         else:
             display_name = entry.get("name")
 
-        tooltip = entry.get("tooltipDescriptionID")
+        tooltip = entry.get("tooltipDescription") or entry.get("tooltipDescriptionID")
         if isinstance(tooltip, dict):
             tooltip_str = tooltip.get("en")
         else:
@@ -868,9 +868,11 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
         icon_id = entry.get("iconID")
         icon_fn = icon_filenames.get(int(icon_id)) if icon_id else None
 
+        category_id = entry.get("attributeCategoryID") or entry.get("categoryID")
+
         rows.append((
             int(attr_id),
-            entry.get("categoryID"), entry.get("name"), display_name,
+            category_id, entry.get("name"), display_name,
             tooltip_str, icon_id, icon_fn,
             entry.get("unitID"),
             bool(entry.get("stackable", True)),
