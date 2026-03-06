@@ -579,7 +579,7 @@ def insert_categories(conn: sqlite3.Connection, sde_dir: str, icon_filenames: di
     for cat_id, entry in data.items():
         names = multiname(entry)
         icon_id = entry.get("iconID")
-        icon_name = icon_filenames.get(int(icon_id), str(icon_id)) if icon_id else ""
+        icon_name = icon_filenames.get(int(icon_id)) if icon_id else None
         rows.append((
             int(cat_id),
             names.get("en"), names.get("de"), names.get("en"),
@@ -606,7 +606,7 @@ def insert_groups(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict):
     for grp_id, entry in data.items():
         names = multiname(entry)
         icon_id = entry.get("iconID")
-        icon_name = icon_filenames.get(int(icon_id), str(icon_id)) if icon_id else ""
+        icon_name = icon_filenames.get(int(icon_id)) if icon_id else None
         rows.append((
             int(grp_id),
             names.get("en"), names.get("de"), names.get("en"),
@@ -694,7 +694,7 @@ def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: di
         if not name:
             name = bsd_names.get(gid, "")
         icon_id = entry.get("iconID")
-        icon_name = icon_filenames.get(int(icon_id), str(icon_id)) if icon_id else ""
+        icon_name = icon_filenames.get(int(icon_id)) if icon_id else None
         parent_id = entry.get("parentGroupID")
         rows.append((gid, name, icon_name, parent_id, 1, None))
     conn.executemany(
@@ -745,7 +745,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
         gd = group_data.get(grp_id, {})
 
         icon_id = entry.get("iconID") or 0
-        icon_fn = (icon_filenames or {}).get(int(icon_id), "") if icon_id else ""
+        icon_fn = (icon_filenames or {}).get(int(icon_id)) if icon_id else None
 
         rows.append((
             type_id,
@@ -866,7 +866,7 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
             tooltip_str = None
 
         icon_id = entry.get("iconID")
-        icon_fn = icon_filenames.get(int(icon_id), "") if icon_id else ""
+        icon_fn = icon_filenames.get(int(icon_id)) if icon_id else None
 
         rows.append((
             int(attr_id),
