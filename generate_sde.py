@@ -269,7 +269,7 @@ def create_schema(conn: sqlite3.Connection):
             categoryID INTEGER, name TEXT, display_name TEXT,
             tooltipDescription TEXT, iconID INTEGER, icon_filename TEXT,
             unitID INTEGER, stackable BOOLEAN, highIsGood BOOLEAN,
-            defaultValue REAL, published BOOLEAN
+            defaultValue REAL, published BOOLEAN, display_when_zero BOOLEAN
         );
 
         CREATE TABLE IF NOT EXISTS dogmaEffects (
@@ -870,6 +870,8 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
 
         category_id = entry.get("attributeCategoryID") or entry.get("categoryID")
 
+        display_when_zero = entry.get("displayWhenZero", True)
+
         rows.append((
             int(attr_id),
             category_id, entry.get("name"), display_name,
@@ -878,8 +880,9 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
             bool(entry.get("stackable", True)),
             bool(entry.get("highIsGood", True)),
             entry.get("defaultValue"), bool(entry.get("published", False)),
+            bool(display_when_zero),
         ))
-    conn.executemany("INSERT OR REPLACE INTO dogmaAttributes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    conn.executemany("INSERT OR REPLACE INTO dogmaAttributes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} dogmaAttributes")
 
