@@ -791,6 +791,89 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
     conn.commit()
     log(f"  {len(data)} types inserted")
 
+    insert_traits(conn, data)
+
+
+def _format_bonus_prefix(bonus_val, unit_id):
+    """Build HTML prefix like '<b>5%</b> ' for a trait bonus."""
+    if isinstance(bonus_val, (int, float)) and unit_id:
+        num = int(bonus_val) if isinstance(bonus_val, float) and bonus_val == int(bonus_val) else bonus_val
+        if unit_id == 105:
+            return f"<b>{num}%</b> "
+        elif unit_id == 104:
+            return f"<b>{num}x</b> "
+        elif unit_id == 139:
+            return f"<b>{num}+</b> "
+        else:
+            return f"<b>{num}</b> "
+    return ""
+
+
+def insert_traits(conn: sqlite3.Connection, type_data: dict):
+    """Extract traits from typeIDs.yaml entries and insert into traits table."""
+    log("Inserting traits...")
+    rows = []
+    for type_id_raw, entry in type_data.items():
+        type_id = int(type_id_raw)
+        traits = entry.get("traits")
+        if not traits:
+            continue
+
+        # roleBonuses
+        for bonus in traits.get("roleBonuses", []):
+            bt = bonus.get("bonusText")
+            if isinstance(bt, dict):
+                content = bt.get("en", "")
+            elif isinstance(bt, str):
+                content = bt
+            else:
+                continue
+            if not content:
+                continue
+            prefix = _format_bonus_prefix(bonus.get("bonus"), bonus.get("unitID"))
+            rows.append((type_id, prefix + content, -1, bonus.get("importance", 999999), "roleBonuses"))
+
+        # types (skill-based bonuses)
+        types_dict = traits.get("types", {})
+        if isinstance(types_dict, dict):
+            for skill_id_raw, bonuses in types_dict.items():
+                skill_id = int(skill_id_raw)
+                if not isinstance(bonuses, list):
+                    continue
+                for bonus in bonuses:
+                    bt = bonus.get("bonusText")
+                    if isinstance(bt, dict):
+                        content = bt.get("en", "")
+                    elif isinstance(bt, str):
+                        content = bt
+                    else:
+                        continue
+                    if not content:
+                        continue
+                    prefix = _format_bonus_prefix(bonus.get("bonus"), bonus.get("unitID"))
+                    rows.append((type_id, prefix + content, skill_id, bonus.get("importance", 999999), "typeBonuses"))
+
+        # miscBonuses
+        for bonus in traits.get("miscBonuses", []):
+            bt = bonus.get("bonusText")
+            if isinstance(bt, dict):
+                content = bt.get("en", "")
+            elif isinstance(bt, str):
+                content = bt
+            else:
+                continue
+            if not content:
+                continue
+            prefix = _format_bonus_prefix(bonus.get("bonus"), bonus.get("unitID"))
+            rows.append((type_id, prefix + content, -1, bonus.get("importance", 999999), "miscBonuses"))
+
+    conn.executemany(
+        "INSERT OR REPLACE INTO traits (typeid, content, skill, importance, bonus_type) VALUES (?,?,?,?,?)",
+        rows
+    )
+    conn.commit()
+    log(f"  {len(rows)} traits")
+
 
 DOGMA_ATTRIBUTE_CATEGORIES = [
     (1, "Fitting", "Fitting capabilities of a ship"),
