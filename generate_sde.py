@@ -1252,23 +1252,33 @@ def _roman(n: int) -> str:
 
 def _build_station_names(sde_dir: str) -> dict:
     """Build stationID -> name map from npcStations + supporting YAML files."""
+    log("  Building station names (loading YAML in parallel)...")
     npc_path = fsd_path(sde_dir, "npcStations.yaml")
-    stations = load_yaml(npc_path)
 
-    sys_path = fsd_path(sde_dir, "mapSolarSystems.yaml")
-    systems = load_yaml(sys_path) if os.path.exists(sys_path) else {}
+    paths = {
+        "stations": npc_path,
+        "systems": fsd_path(sde_dir, "mapSolarSystems.yaml"),
+        "moons": fsd_path(sde_dir, "mapMoons.yaml"),
+        "planets": fsd_path(sde_dir, "mapPlanets.yaml"),
+        "corps": fsd_path(sde_dir, "npcCorporations.yaml"),
+        "ops": fsd_path(sde_dir, "stationOperations.yaml"),
+    }
 
-    moon_path = fsd_path(sde_dir, "mapMoons.yaml")
-    moons = load_yaml(moon_path) if os.path.exists(moon_path) else {}
+    def _load(key):
+        p = paths[key]
+        return (key, load_yaml(p) if os.path.exists(p) else {})
 
-    planet_path = fsd_path(sde_dir, "mapPlanets.yaml")
-    planets = load_yaml(planet_path) if os.path.exists(planet_path) else {}
+    loaded = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for key, data in ex.map(_load, paths.keys()):
+            loaded[key] = data
 
-    corp_path = fsd_path(sde_dir, "npcCorporations.yaml")
-    corps = load_yaml(corp_path) if os.path.exists(corp_path) else {}
-
-    ops_path = fsd_path(sde_dir, "stationOperations.yaml")
-    ops = load_yaml(ops_path) if os.path.exists(ops_path) else {}
+    stations = loaded["stations"]
+    systems = loaded["systems"]
+    moons = loaded["moons"]
+    planets = loaded["planets"]
+    corps = loaded["corps"]
+    ops = loaded["ops"]
 
     result = {}
     for station_id, entry in stations.items():
@@ -1300,7 +1310,8 @@ def _build_station_names(sde_dir: str) -> dict:
             name = f"{sys_name} {_roman(planet_index)} - {corp_name} {op_name}"
         else:
             name = f"{sys_name} - {corp_name} {op_name}"
-        result[int(station_id)] = name.strip()
+        security = solar_sys.get("security")
+        result[int(station_id)] = (name.strip(), security)
     return result
 
 
@@ -1323,16 +1334,19 @@ def insert_stations(conn: sqlite3.Connection, sde_dir: str):
     elif os.path.exists(npc_path):
         log("Inserting stations from npcStations.yaml...")
         data = load_yaml(npc_path)
-        station_names = _build_station_names(sde_dir)
+        station_info = _build_station_names(sde_dir)
         for station_id, entry in data.items():
             type_id = entry.get("typeID")
+            info = station_info.get(int(station_id))
+            name = info[0] if info else f"Station {station_id}"
+            security = info[1] if info else None
             rows.append((
                 int(station_id),
                 type_id,
-                station_names.get(int(station_id), f"Station {station_id}"),
+                name,
                 None,
                 entry.get("solarSystemID"),
-                None,
+                security,
             ))
     else:
         log("SKIP: no stations file found")
