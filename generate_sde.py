@@ -645,6 +645,19 @@ def populate_representative_types(conn: sqlite3.Connection):
         )
     """)
     conn.commit()
+    for _ in range(10):
+        updated = conn.execute("""
+            UPDATE marketGroups SET representative_type_id = (
+                SELECT MIN(child.representative_type_id)
+                FROM marketGroups child
+                WHERE child.parentgroup_id = marketGroups.group_id
+                  AND child.representative_type_id IS NOT NULL
+            )
+            WHERE representative_type_id IS NULL
+        """).rowcount
+        conn.commit()
+        if updated == 0:
+            break
     log("  Done.")
 
 
