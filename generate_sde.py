@@ -1104,10 +1104,84 @@ def _parse_system(args):
     return sys_row, univ_row
 
 
+def _localized_name(name_obj, default: str = "") -> tuple:
+    """Extract (en, de, es, fr, ja, ko, ru, zh) from a name dict or string."""
+    if isinstance(name_obj, dict):
+        en = name_obj.get("en", default)
+        return (en, name_obj.get("de", en), en, name_obj.get("es", en),
+                name_obj.get("fr", en), name_obj.get("ja", en),
+                name_obj.get("ko", en), name_obj.get("ru", en),
+                name_obj.get("zh", en))
+    s = str(name_obj) if name_obj else default
+    return (s, s, s, s, s, s, s, s, s)
+
+
+def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
+    """Populate regions, constellations, solarsystems, universe from mapXxx.yaml files."""
+    regions_path = fsd_path(sde_dir, "mapRegions.yaml")
+    consts_path = fsd_path(sde_dir, "mapConstellations.yaml")
+    systems_path = fsd_path(sde_dir, "mapSolarSystems.yaml")
+
+    if not os.path.exists(systems_path):
+        log("SKIP: mapSolarSystems.yaml not found")
+        return
+
+    log("Inserting universe data from mapXxx.yaml files...")
+    region_rows = []
+    const_rows = []
+    sys_rows = []
+    univ_rows = []
+
+    sys_to_const = {}
+    const_to_region = {}
+
+    if os.path.exists(regions_path):
+        regions_data = load_yaml(regions_path)
+        for region_id, entry in regions_data.items():
+            n = _localized_name(entry.get("name", ""))
+            region_rows.append((int(region_id), n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]))
+
+    if os.path.exists(consts_path):
+        consts_data = load_yaml(consts_path)
+        for const_id, entry in consts_data.items():
+            n = _localized_name(entry.get("name", ""))
+            const_rows.append((int(const_id), n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]))
+            rid = entry.get("regionID")
+            if rid:
+                const_to_region[int(const_id)] = int(rid)
+
+    systems_data = load_yaml(systems_path)
+    for sys_id, entry in systems_data.items():
+        n = _localized_name(entry.get("name", ""))
+        sec = entry.get("security", 0.0)
+        sys_rows.append((int(sys_id), n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], sec))
+
+        const_id = entry.get("constellationID", 0)
+        region_id = const_to_region.get(const_id, 0)
+        pos = entry.get("position", {})
+        x = pos.get("x", 0.0)
+        y = pos.get("y", 0.0)
+        z = pos.get("z", 0.0)
+        is_jspace = 1 if (n[0] or "").startswith("J") and any(c.isdigit() for c in (n[0] or "")) else 0
+        univ_rows.append((
+            region_id, const_id, int(sys_id), sec, 0,
+            x, y, z,
+            0, 0, is_jspace, 0,
+            0, 0, 0, 0, 0, 0, 0, 0
+        ))
+
+    conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
+    conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
+    conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
+    conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
+    conn.commit()
+    log(f"  {len(region_rows)} regions, {len(const_rows)} constellations, {len(sys_rows)} solar systems inserted")
+
+
 def insert_universe(conn: sqlite3.Connection, sde_dir: str):
     universe_root = os.path.join(sde_dir, "universe")
     if not os.path.exists(universe_root):
-        log("SKIP: universe/ folder not found")
+        _insert_universe_from_map_files(conn, sde_dir)
         return
     log("Inserting universe data (parallel read)...")
 
@@ -1166,6 +1240,70 @@ def insert_universe(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(sys_rows)} solar systems inserted")
 
 
+def _roman(n: int) -> str:
+    vals = [(1000,'M'),(900,'CM'),(500,'D'),(400,'CD'),(100,'C'),(90,'XC'),
+            (50,'L'),(40,'XL'),(10,'X'),(9,'IX'),(5,'V'),(4,'IV'),(1,'I')]
+    r = ""
+    for v, s in vals:
+        while n >= v:
+            r += s; n -= v
+    return r
+
+
+def _build_station_names(sde_dir: str) -> dict:
+    """Build stationID -> name map from npcStations + supporting YAML files."""
+    npc_path = fsd_path(sde_dir, "npcStations.yaml")
+    stations = load_yaml(npc_path)
+
+    sys_path = fsd_path(sde_dir, "mapSolarSystems.yaml")
+    systems = load_yaml(sys_path) if os.path.exists(sys_path) else {}
+
+    moon_path = fsd_path(sde_dir, "mapMoons.yaml")
+    moons = load_yaml(moon_path) if os.path.exists(moon_path) else {}
+
+    planet_path = fsd_path(sde_dir, "mapPlanets.yaml")
+    planets = load_yaml(planet_path) if os.path.exists(planet_path) else {}
+
+    corp_path = fsd_path(sde_dir, "npcCorporations.yaml")
+    corps = load_yaml(corp_path) if os.path.exists(corp_path) else {}
+
+    ops_path = fsd_path(sde_dir, "stationOperations.yaml")
+    ops = load_yaml(ops_path) if os.path.exists(ops_path) else {}
+
+    result = {}
+    for station_id, entry in stations.items():
+        solar_sys = systems.get(entry.get("solarSystemID"), {})
+        sys_name_obj = solar_sys.get("name", {})
+        sys_name = sys_name_obj.get("en", "") if isinstance(sys_name_obj, dict) else str(sys_name_obj)
+
+        orbit_id = entry.get("orbitID")
+        moon_data = moons.get(orbit_id, {})
+        moon_orbit_index = moon_data.get("orbitIndex")
+
+        planet_id = moon_data.get("orbitID")
+        planet_data = planets.get(planet_id, {})
+        planet_index = planet_data.get("celestialIndex") or entry.get("celestialIndex")
+
+        owner_id = entry.get("ownerID")
+        corp_data = corps.get(owner_id, {})
+        corp_name_obj = corp_data.get("name", {})
+        corp_name = corp_name_obj.get("en", "") if isinstance(corp_name_obj, dict) else str(corp_name_obj)
+
+        op_id = entry.get("operationID")
+        op_data = ops.get(op_id, {})
+        op_name_obj = op_data.get("operationName", {})
+        op_name = op_name_obj.get("en", "") if isinstance(op_name_obj, dict) else str(op_name_obj)
+
+        if sys_name and planet_index and moon_orbit_index is not None:
+            name = f"{sys_name} {_roman(planet_index)} - Moon {moon_orbit_index} - {corp_name} {op_name}"
+        elif sys_name and planet_index:
+            name = f"{sys_name} {_roman(planet_index)} - {corp_name} {op_name}"
+        else:
+            name = f"{sys_name} - {corp_name} {op_name}"
+        result[int(station_id)] = name.strip()
+    return result
+
+
 def insert_stations(conn: sqlite3.Connection, sde_dir: str):
     bsd_path = os.path.join(sde_dir, "bsd", "staStations.yaml")
     npc_path = fsd_path(sde_dir, "npcStations.yaml")
@@ -1185,17 +1323,13 @@ def insert_stations(conn: sqlite3.Connection, sde_dir: str):
     elif os.path.exists(npc_path):
         log("Inserting stations from npcStations.yaml...")
         data = load_yaml(npc_path)
-        type_names = {}
-        cur = conn.cursor()
-        cur.execute("SELECT type_id, en_name FROM types")
-        for r in cur.fetchall():
-            type_names[r[0]] = r[1]
+        station_names = _build_station_names(sde_dir)
         for station_id, entry in data.items():
             type_id = entry.get("typeID")
             rows.append((
                 int(station_id),
                 type_id,
-                type_names.get(type_id),
+                station_names.get(int(station_id), f"Station {station_id}"),
                 None,
                 entry.get("solarSystemID"),
                 None,
