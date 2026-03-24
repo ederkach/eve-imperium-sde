@@ -853,11 +853,11 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
     for attr_id, entry in data.items():
         display = entry.get("displayName") or entry.get("displayNameID")
         if isinstance(display, dict):
-            display_name = display.get("en") or entry.get("name")
+            display_name = display.get("en")
         elif isinstance(display, str):
             display_name = display
         else:
-            display_name = entry.get("name")
+            display_name = None
 
         tooltip = entry.get("tooltipDescription") or entry.get("tooltipDescriptionID")
         if isinstance(tooltip, dict):
