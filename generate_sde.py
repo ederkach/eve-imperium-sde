@@ -511,6 +511,7 @@ def create_schema(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS traits (
             typeid INTEGER NOT NULL,
             content TEXT NOT NULL,
+            content_ru TEXT,
             skill INTEGER NOT NULL DEFAULT -1,
             importance INTEGER, bonus_type TEXT,
             PRIMARY KEY (typeid, content, skill)
@@ -791,7 +792,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
     conn.commit()
     log(f"  {len(data)} types inserted")
 
-    insert_traits(conn, data)
+    insert_traits(conn, data, sde_dir)
 
 
 def _format_bonus_prefix(bonus_val, unit_id):
@@ -809,31 +810,49 @@ def _format_bonus_prefix(bonus_val, unit_id):
     return ""
 
 
-def insert_traits(conn: sqlite3.Connection, type_data: dict):
-    """Extract traits from typeIDs.yaml entries and insert into traits table."""
+def insert_traits(conn: sqlite3.Connection, type_data: dict, sde_dir: str = ""):
+    """Extract traits from types data or typeBonus.yaml and insert into traits table."""
     log("Inserting traits...")
+
+    # The S3 SDE embeds traits inside each type entry in types.yaml.
+    # The developers.eveonline.com SDE puts them in a separate typeBonus.yaml.
+    has_embedded = any(entry.get("traits") for entry in type_data.values())
+    if has_embedded:
+        trait_source = {tid: entry.get("traits") for tid, entry in type_data.items() if entry.get("traits")}
+    else:
+        bonus_path = fsd_path(sde_dir, "typeBonus.yaml", "typeBonus.yaml") if sde_dir else ""
+        if sde_dir and os.path.exists(bonus_path):
+            log(f"  Loading traits from {os.path.basename(bonus_path)}...")
+            trait_source = load_yaml(bonus_path)
+        else:
+            log("  No traits data found (neither embedded nor typeBonus.yaml)")
+            trait_source = {}
+
     rows = []
-    for type_id_raw, entry in type_data.items():
+    for type_id_raw, traits in trait_source.items():
         type_id = int(type_id_raw)
-        traits = entry.get("traits")
         if not traits:
             continue
 
-        # roleBonuses
-        for bonus in traits.get("roleBonuses", []):
+        def _extract_bonus(bonus, skill_id, bonus_type):
             bt = bonus.get("bonusText")
             if isinstance(bt, dict):
-                content = bt.get("en", "")
+                content_en = bt.get("en", "")
+                content_ru = bt.get("ru")
             elif isinstance(bt, str):
-                content = bt
+                content_en = bt
+                content_ru = None
             else:
-                continue
-            if not content:
-                continue
+                return
+            if not content_en:
+                return
             prefix = _format_bonus_prefix(bonus.get("bonus"), bonus.get("unitID"))
-            rows.append((type_id, prefix + content, -1, bonus.get("importance", 999999), "roleBonuses"))
+            rows.append((type_id, prefix + content_en, prefix + content_ru if content_ru else None,
+                         skill_id, bonus.get("importance", 999999), bonus_type))
 
-        # types (skill-based bonuses)
+        for bonus in traits.get("roleBonuses", []):
+            _extract_bonus(bonus, -1, "roleBonuses")
+
         types_dict = traits.get("types", {})
         if isinstance(types_dict, dict):
             for skill_id_raw, bonuses in types_dict.items():
@@ -841,34 +860,13 @@ def insert_traits(conn: sqlite3.Connection, type_data: dict):
                 if not isinstance(bonuses, list):
                     continue
                 for bonus in bonuses:
-                    bt = bonus.get("bonusText")
-                    if isinstance(bt, dict):
-                        content = bt.get("en", "")
-                    elif isinstance(bt, str):
-                        content = bt
-                    else:
-                        continue
-                    if not content:
-                        continue
-                    prefix = _format_bonus_prefix(bonus.get("bonus"), bonus.get("unitID"))
-                    rows.append((type_id, prefix + content, skill_id, bonus.get("importance", 999999), "typeBonuses"))
+                    _extract_bonus(bonus, skill_id, "typeBonuses")
 
-        # miscBonuses
         for bonus in traits.get("miscBonuses", []):
-            bt = bonus.get("bonusText")
-            if isinstance(bt, dict):
-                content = bt.get("en", "")
-            elif isinstance(bt, str):
-                content = bt
-            else:
-                continue
-            if not content:
-                continue
-            prefix = _format_bonus_prefix(bonus.get("bonus"), bonus.get("unitID"))
-            rows.append((type_id, prefix + content, -1, bonus.get("importance", 999999), "miscBonuses"))
+            _extract_bonus(bonus, -1, "miscBonuses")
 
     conn.executemany(
-        "INSERT OR REPLACE INTO traits (typeid, content, skill, importance, bonus_type) VALUES (?,?,?,?,?)",
+        "INSERT OR REPLACE INTO traits (typeid, content, content_ru, skill, importance, bonus_type) VALUES (?,?,?,?,?,?)",
         rows
     )
     conn.commit()
