@@ -1153,7 +1153,7 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
     systems_data = load_yaml(systems_path)
     for sys_id, entry in systems_data.items():
         n = _localized_name(entry.get("name", ""))
-        sec = entry.get("security", 0.0)
+        sec = entry.get("securityStatus") or entry.get("security") or 0.0
         sys_rows.append((int(sys_id), n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], sec))
 
         const_id = entry.get("constellationID", 0)
@@ -1310,7 +1310,7 @@ def _build_station_names(sde_dir: str) -> dict:
             name = f"{sys_name} {_roman(planet_index)} - {corp_name} {op_name}"
         else:
             name = f"{sys_name} - {corp_name} {op_name}"
-        security = solar_sys.get("security")
+        security = solar_sys.get("securityStatus") or solar_sys.get("security")
         result[int(station_id)] = (name.strip(), security)
     return result
 
