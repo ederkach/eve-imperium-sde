@@ -1497,10 +1497,12 @@ def insert_planet_schematics(conn: sqlite3.Connection, sde_dir: str):
 
         if out_type is None:
             continue
+        pins = entry.get("pins", [])
+        facilitys = ",".join(str(p) for p in pins) if pins else None
         rows.append((
             int(sch_id), out_type,
             entry.get("nameID", {}).get("en") if isinstance(entry.get("nameID"), dict) else None,
-            None,
+            facilitys,
             entry.get("cycleTime"),
             out_qty,
             ",".join(in_types), ",".join(in_qtys),
