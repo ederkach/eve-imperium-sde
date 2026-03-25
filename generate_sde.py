@@ -557,6 +557,17 @@ def create_schema(conn: sqlite3.Connection):
             representative_type_id INTEGER
         );
 
+        CREATE TABLE IF NOT EXISTS typeMaterials (
+            typeid INTEGER NOT NULL,
+            process_size INTEGER NOT NULL,
+            output_material INTEGER NOT NULL,
+            output_quantity INTEGER NOT NULL,
+            output_material_name TEXT,
+            output_material_icon TEXT,
+            categoryid INTEGER,
+            PRIMARY KEY (typeid, output_material)
+        );
+
         CREATE TABLE IF NOT EXISTS version_info (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             build_number INTEGER NOT NULL,
@@ -786,7 +797,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
             None, None, None,
             None, None, None,
             entry.get("variationParentTypeID"),
-            None,
+            entry.get("portionSize"),
             None, None, None, None,
         ))
 
@@ -1499,6 +1510,43 @@ def insert_planet_schematics(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(rows)} planetSchematics")
 
 
+def insert_type_materials(conn: sqlite3.Connection, sde_dir: str):
+    path = fsd_path(sde_dir, "typeMaterials.yaml")
+    if not os.path.exists(path):
+        log("SKIP: fsd/typeMaterials.yaml not found")
+        return
+    log("Inserting typeMaterials...")
+    data = load_yaml(path)
+
+    type_info = {}
+    cur = conn.cursor()
+    cur.execute("SELECT type_id, en_name, icon_filename, categoryID FROM types")
+    for row in cur.fetchall():
+        type_info[row[0]] = (row[1], row[2], row[3])
+
+    portion_sizes = {}
+    cur.execute("SELECT type_id, process_size FROM types WHERE process_size IS NOT NULL AND process_size > 0")
+    for row in cur.fetchall():
+        portion_sizes[row[0]] = row[1]
+
+    rows = []
+    for type_id_raw, entry in data.items():
+        type_id = int(type_id_raw)
+        materials = entry.get("materials", []) or []
+        portion = portion_sizes.get(type_id, 1)
+        ti = type_info.get(type_id, (None, None, None))
+        cat_id = ti[2]
+        for mat in materials:
+            mat_tid = mat.get("materialTypeID")
+            mat_qty = mat.get("quantity", 0)
+            mi = type_info.get(mat_tid, (None, None, None))
+            rows.append((type_id, portion, mat_tid, mat_qty, mi[0], mi[1], cat_id))
+
+    conn.executemany("INSERT OR REPLACE INTO typeMaterials VALUES (?,?,?,?,?,?,?)", rows)
+    conn.commit()
+    log(f"  {len(rows)} typeMaterials rows")
+
+
 def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
     path = fsd_path(sde_dir, "blueprints.yaml")
     if not os.path.exists(path):
@@ -1695,6 +1743,8 @@ def create_indexes(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_agents_solarSystemID ON agents(solarSystemID);
         CREATE INDEX IF NOT EXISTS idx_agents_locationID ON agents(locationID);
         CREATE INDEX IF NOT EXISTS idx_agents_corporationID ON agents(corporationID);
+        CREATE INDEX IF NOT EXISTS idx_typeMaterials_typeid ON typeMaterials(typeid);
+        CREATE INDEX IF NOT EXISTS idx_typeMaterials_output ON typeMaterials(output_material);
     """)
     conn.commit()
     log("  Indexes created")
@@ -1782,6 +1832,7 @@ def main():
     insert_npc_corporations(conn, sde_dir)
     insert_agents(conn, sde_dir)
     insert_planet_schematics(conn, sde_dir)
+    insert_type_materials(conn, sde_dir)
     insert_blueprints(conn, sde_dir)
     insert_version_info(conn)
 
