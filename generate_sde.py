@@ -592,6 +592,8 @@ def insert_categories(conn: sqlite3.Connection, sde_dir: str, icon_filenames: di
         names = multiname(entry)
         icon_id = entry.get("iconID")
         icon_name = icon_filenames.get(int(icon_id)) if icon_id else None
+        if not icon_name:
+            icon_name = f"category_{int(cat_id)}"
         rows.append((
             int(cat_id),
             names.get("en"), names.get("de"), names.get("en"),
@@ -1388,7 +1390,7 @@ def insert_factions(conn: sqlite3.Connection, sde_dir: str):
             names.get("en"), names.get("de"), names.get("en"),
             names.get("es"), names.get("fr"), names.get("ja"),
             names.get("ko"), names.get("ru"), names.get("zh"),
-            None, None, entry.get("iconID"),
+            None, None, f"faction_{int(fact_id)}.png",
         ))
     conn.executemany("INSERT OR REPLACE INTO factions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
@@ -1414,7 +1416,7 @@ def insert_npc_corporations(conn: sqlite3.Connection, sde_dir: str):
             names.get("es"), names.get("fr"), names.get("ja"),
             names.get("ko"), names.get("ru"), names.get("zh"),
             None, entry.get("factionID"), entry.get("militiaFactionID"),
-            None,
+            f"corperation_{int(corp_id)}_128.png",
         ))
 
         lp_raw = entry.get("loyaltyStoreOffers", []) or []
