@@ -134,7 +134,9 @@ class IconBuildData:
 def build_icon_export(output_mode: str, skip_output_if_fresh: bool, data: IconBuildData,
                      cache: SharedCache, icon_dir: Path, force_rebuild: bool,
                      silent_mode: bool, log_file=None, out=None, show_progress: bool = True,
-                     skip_skins: bool = False, test_type_id: Optional[int] = None, **output_params) -> Tuple[int, int]:
+                     skip_skins: bool = False, test_type_id: Optional[int] = None,
+                     skip_renders: bool = False, skip_bpc: bool = False,
+                     **output_params) -> Tuple[int, int]:
     icon_dir.mkdir(parents=True, exist_ok=True)
 
     old_index = set()
@@ -216,7 +218,8 @@ def build_icon_export(output_mode: str, skip_output_if_fresh: bool, data: IconBu
             output_params['out'] = out
 
         _generate_output(output_mode, output_params, icon_dir, new_index,
-                        service_metadata, old_index, force_rebuild, silent_mode, log_file, cache, data)
+                        service_metadata, old_index, force_rebuild, silent_mode, log_file, cache, data,
+                        skip_renders=skip_renders, skip_bpc=skip_bpc)
 
     for filename in to_remove:
         try:
@@ -405,7 +408,8 @@ def _process_regular_item(type_id: int, type_info: TypeInfo, category_id: int,
 def _generate_output(output_mode: str, output_params: dict, icon_dir: Path,
                     new_index: Set[str], service_metadata: Dict,
                     old_index: Set[str], force_rebuild: bool, silent_mode: bool, log_file,
-                    cache: SharedCache, data: IconBuildData):
+                    cache: SharedCache, data: IconBuildData,
+                    skip_renders: bool = False, skip_bpc: bool = False):
     if output_mode == 'service_bundle':
         out_path = Path(output_params['out'])
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,10 +434,10 @@ def _generate_output(output_mode: str, output_params: dict, icon_dir: Path,
                     if icon_kind == IconKind.ICON:
                         output_name = f"type_{type_id}_64.png"
                         zf.write(icon_dir / filename, output_name)
-                    elif icon_kind == IconKind.BLUEPRINT_COPY:
+                    elif icon_kind == IconKind.BLUEPRINT_COPY and not skip_bpc:
                         output_name = f"type_{type_id}_bpc_64.png"
                         zf.write(icon_dir / filename, output_name)
-                    elif icon_kind == IconKind.RENDER:
+                    elif icon_kind == IconKind.RENDER and not skip_renders:
                         output_name = f"type_{type_id}_512.jpg"
                         zf.write(icon_dir / filename, output_name)
 

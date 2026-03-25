@@ -69,7 +69,7 @@ def main():
     sde.close()
     log(f"Loaded {len(data.types)} types")
 
-    log("Building icons (IEC format with type_ prefix)...")
+    log("Building icons (IEC format with type_ prefix, no renders/bpc)...")
     added, removed = build_icon_export(
         output_mode="iec",
         skip_output_if_fresh=False,
@@ -79,6 +79,8 @@ def main():
         force_rebuild=args.force,
         silent_mode=False,
         skip_skins=args.skip_skins,
+        skip_renders=True,
+        skip_bpc=True,
         out=args.out,
     )
 
@@ -99,6 +101,7 @@ def main():
             try:
                 resource_path = cache.path_of(resource)
                 zf.write(str(resource_path), arc_name)
+                existing.add(arc_name)
                 attr_count += 1
             except (CacheError, Exception):
                 pass
