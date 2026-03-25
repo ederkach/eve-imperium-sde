@@ -8,13 +8,18 @@ on:
         required: false
         default: 'true'
         type: boolean
+      build_icons:
+        description: 'Generate type icons from EVE game cache'
+        required: false
+        default: 'true'
+        type: boolean
   schedule:
     - cron: '0 6 * * 1'
 
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: write
 
@@ -31,7 +36,7 @@ jobs:
         run: sudo apt-get install -y libyaml-dev
 
       - name: Install dependencies
-        run: pip install pyyaml requests
+        run: pip install pyyaml requests Pillow numpy
 
       - name: Get week number for cache key
         id: date
@@ -69,6 +74,33 @@ jobs:
           echo "build=$BUILD" >> $GITHUB_OUTPUT
           echo "SDE build: $BUILD"
 
+      - name: Cache EVE game files
+        if: inputs.build_icons != 'false'
+        uses: actions/cache@v4
+        with:
+          path: icon_cache
+          key: eve-cache-${{ steps.date.outputs.week }}
+          restore-keys: |
+            eve-cache-
+
+      - name: Cache icon working directory
+        if: inputs.build_icons != 'false'
+        uses: actions/cache@v4
+        with:
+          path: icon_work
+          key: icon-work-${{ steps.date.outputs.week }}
+          restore-keys: |
+            icon-work-
+
+      - name: Generate type icons
+        if: inputs.build_icons != 'false'
+        run: |
+          python3 build_icons.py \
+            --out icons.zip \
+            --cache-dir icon_cache \
+            --icon-dir icon_work \
+            --skip-skins
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -80,6 +112,7 @@ jobs:
             Generated from CCP Static Data Export on ${{ github.run_id }}
           files: |
             item_db_en.zip
+            icons.zip
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
