@@ -107,6 +107,75 @@ def main():
                 pass
     log(f"Added {attr_count} attribute icons to Icons/items/")
 
+    log("Appending category icons to output...")
+    CATEGORY_ICON_MAP = {
+        0: "res:/ui/texture/icons/7_64_4.png",
+        1: "res:/ui/texture/icons/70_128_11.png",
+        2: "type_6_64.png",
+        3: "type_1932_64.png",
+        4: "type_34_64.png",
+        5: "type_29668_64.png",
+        6: "res:/ui/texture/icons/26_64_2.png",
+        7: "res:/ui/texture/icons/2_64_11.png",
+        8: "res:/ui/texture/icons/5_64_2.png",
+        9: "type_1002_64.png",
+        10: "res:/ui/texture/icons/6_64_3.png",
+        11: "res:/ui/texture/icons/26_64_10.png",
+        14: "res:/ui/texture/icons/modules/fleetboost_infobase.png",
+        16: "type_2403_64.png",
+        17: "type_11068_64.png",
+        18: "type_2454_64.png",
+        20: "res:/ui/texture/icons/40_64_16.png",
+        22: "type_33475_64.png",
+        23: "type_17174_64.png",
+        24: "res:/ui/texture/icons/comprfuel_amarr.png",
+        25: "res:/ui/texture/icons/inventory/moonasteroid_r4.png",
+        30: "res:/ui/texture/icons/inventory/cratexvishirt.png",
+        32: "res:/ui/texture/icons/76_64_7.png",
+        34: "type_30752_64.png",
+        35: "res:/ui/texture/icons/55_64_11.png",
+        39: "res:/ui/texture/icons/95_64_6.png",
+        40: "type_32458_64.png",
+        41: "type_2409_64.png",
+        42: "res:/ui/texture/icons/97_64_10.png",
+        43: "res:/ui/texture/icons/99_64_8.png",
+        46: "type_2233_64.png",
+        63: "type_19658_64.png",
+        65: "type_40340_64.png",
+        66: "type_35923_64.png",
+        87: "type_23061_64.png",
+        91: "res:/ui/texture/icons/rewardtrack/crateskincontainer.png",
+        2100: "type_57203_64.png",
+        2118: "type_83291_64.png",
+        2143: "type_81143_64.png",
+    }
+    cat_count = 0
+    with ZipFile(args.out, "a", ZIP_STORED) as zf:
+        existing = set(zf.namelist())
+        for cat_id, source in CATEGORY_ICON_MAP.items():
+            arc_name = f"category_{cat_id}.png"
+            if arc_name in existing:
+                continue
+            try:
+                if source.startswith("res:/"):
+                    resource_path = cache.path_of(source)
+                    zf.write(str(resource_path), arc_name)
+                    cat_count += 1
+                elif source.startswith("type_"):
+                    if source in existing:
+                        with zf.open(source) as src:
+                            zf.writestr(arc_name, src.read())
+                        cat_count += 1
+                    else:
+                        type_path = Path(args.icon_dir) / source
+                        if type_path.exists():
+                            zf.write(str(type_path), arc_name)
+                            cat_count += 1
+            except (CacheError, Exception) as e:
+                log(f"  Warning: failed category_{cat_id}: {e}")
+        existing.add(arc_name)
+    log(f"Added {cat_count} category icons")
+
     elapsed = time.time() - start
     log(f"Done in {elapsed:.1f}s ({added} new type icons, {removed} removed)")
     log(f"Output: {args.out}")
