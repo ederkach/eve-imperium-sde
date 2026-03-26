@@ -1376,13 +1376,14 @@ def insert_stations(conn: sqlite3.Connection, sde_dir: str):
     conn.commit()
 
 
-def insert_factions(conn: sqlite3.Connection, sde_dir: str):
+def insert_factions(conn: sqlite3.Connection, sde_dir: str) -> dict:
     path = fsd_path(sde_dir, "factions.yaml")
     if not os.path.exists(path):
-        return
+        return {}
     log("Inserting factions...")
     data = load_yaml(path)
     rows = []
+    militia_corp_to_faction = {}
     for fact_id, entry in data.items():
         names = multiname(entry)
         rows.append((
@@ -1392,16 +1393,22 @@ def insert_factions(conn: sqlite3.Connection, sde_dir: str):
             names.get("ko"), names.get("ru"), names.get("zh"),
             None, None, f"faction_{int(fact_id)}.png",
         ))
+        militia_corp_id = entry.get("militiaCorporationID")
+        if militia_corp_id:
+            militia_corp_to_faction[int(militia_corp_id)] = int(fact_id)
     conn.executemany("INSERT OR REPLACE INTO factions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} factions")
+    return militia_corp_to_faction
 
 
-def insert_npc_corporations(conn: sqlite3.Connection, sde_dir: str):
+def insert_npc_corporations(conn: sqlite3.Connection, sde_dir: str, militia_corp_to_faction: dict = None):
     path = fsd_path(sde_dir, "npcCorporations.yaml")
     if not os.path.exists(path):
         return
     log("Inserting npcCorporations...")
+    if militia_corp_to_faction is None:
+        militia_corp_to_faction = {}
     data = load_yaml(path)
     rows = []
     corp_lp_offers = []
@@ -1409,14 +1416,16 @@ def insert_npc_corporations(conn: sqlite3.Connection, sde_dir: str):
     lp_requirements = []
 
     for corp_id, entry in data.items():
+        cid = int(corp_id)
         names = multiname(entry)
+        militia_faction = militia_corp_to_faction.get(cid) or entry.get("militiaFactionID")
         rows.append((
-            int(corp_id),
+            cid,
             names.get("en"), names.get("de"), names.get("en"),
             names.get("es"), names.get("fr"), names.get("ja"),
             names.get("ko"), names.get("ru"), names.get("zh"),
-            None, entry.get("factionID"), entry.get("militiaFactionID"),
-            f"corperation_{int(corp_id)}_128.png",
+            None, entry.get("factionID"), militia_faction,
+            f"corperation_{cid}_128.png",
         ))
 
         lp_raw = entry.get("loyaltyStoreOffers", []) or []
@@ -1845,8 +1854,8 @@ def main():
     insert_types_dogma(conn, sde_dir)
     insert_universe(conn, sde_dir)
     insert_stations(conn, sde_dir)
-    insert_factions(conn, sde_dir)
-    insert_npc_corporations(conn, sde_dir)
+    militia_map = insert_factions(conn, sde_dir)
+    insert_npc_corporations(conn, sde_dir, militia_map)
     insert_agents(conn, sde_dir)
     insert_planet_schematics(conn, sde_dir)
     insert_type_materials(conn, sde_dir)
