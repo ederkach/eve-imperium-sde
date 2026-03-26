@@ -1446,24 +1446,25 @@ def insert_npc_corporations(conn: sqlite3.Connection, sde_dir: str, militia_corp
                 lp_requirements.append((offer_id, req.get("typeID"), req.get("quantity", 0)))
 
     conn.executemany("INSERT OR REPLACE INTO npcCorporations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
-    if corp_lp_offers:
+
+    lp_db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lp_data.sqlite")
+    if os.path.exists(lp_db):
+        log("  Importing loyalty data from lp_data.sqlite...")
+        lp_conn = sqlite3.connect(lp_db)
+        for tbl in ["loyalty_offers", "loyalty_offer_outputs", "loyalty_offer_requirements"]:
+            lp_rows = lp_conn.execute(f"SELECT * FROM {tbl}").fetchall()
+            if lp_rows:
+                ph = ",".join(["?"] * len(lp_rows[0]))
+                conn.executemany(f"INSERT OR REPLACE INTO {tbl} VALUES ({ph})", lp_rows)
+                if tbl == "loyalty_offers":
+                    corp_lp_offers = lp_rows
+                log(f"    {tbl}: {len(lp_rows)} rows")
+        lp_conn.close()
+    elif corp_lp_offers:
         conn.executemany("INSERT OR REPLACE INTO loyalty_offers VALUES (?,?)", corp_lp_offers)
         conn.executemany("INSERT OR REPLACE INTO loyalty_offer_outputs VALUES (?,?,?,?,?,?)", lp_outputs)
         if lp_requirements:
             conn.executemany("INSERT OR REPLACE INTO loyalty_offer_requirements VALUES (?,?,?)", lp_requirements)
-    else:
-        lp_db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lp_data.sqlite")
-        if os.path.exists(lp_db):
-            log("  YAML has no loyaltyStoreOffers, importing from lp_data.sqlite...")
-            lp_conn = sqlite3.connect(lp_db)
-            for tbl in ["loyalty_offers", "loyalty_offer_outputs", "loyalty_offer_requirements"]:
-                lp_rows = lp_conn.execute(f"SELECT * FROM {tbl}").fetchall()
-                if lp_rows:
-                    ph = ",".join(["?"] * len(lp_rows[0]))
-                    conn.executemany(f"INSERT OR REPLACE INTO {tbl} VALUES ({ph})", lp_rows)
-                    corp_lp_offers.extend(lp_rows) if tbl == "loyalty_offers" else None
-                    log(f"    {tbl}: {len(lp_rows)} rows")
-            lp_conn.close()
     conn.commit()
     log(f"  {len(rows)} npcCorporations, {len(corp_lp_offers)} loyalty offers")
 
