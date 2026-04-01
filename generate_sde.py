@@ -1281,19 +1281,52 @@ def insert_universe(conn: sqlite3.Connection, sde_dir: str):
 
 
 def insert_celestial_names(conn: sqlite3.Connection, sde_dir: str):
-    """Populate celestialNames from bsd/invNames.yaml (planet + moon IDs 40xxxxxx)."""
-    inv_names_path = os.path.join(sde_dir, "bsd", "invNames.yaml")
-    if not os.path.exists(inv_names_path):
-        log("SKIP insert_celestial_names: bsd/invNames.yaml not found")
+    """Populate celestialNames from mapPlanets.yaml + mapMoons.yaml + mapSolarSystems.yaml."""
+    planets_path = fsd_path(sde_dir, "mapPlanets.yaml")
+    moons_path = fsd_path(sde_dir, "mapMoons.yaml")
+    systems_path = fsd_path(sde_dir, "mapSolarSystems.yaml")
+
+    if not os.path.exists(planets_path):
+        log("SKIP insert_celestial_names: mapPlanets.yaml not found")
         return
-    log("Inserting celestial names from bsd/invNames.yaml...")
-    data = load_yaml(inv_names_path)
+
+    log("Inserting celestial names from mapPlanets/mapMoons/mapSolarSystems...")
+
+    sys_names: dict = {}
+    if os.path.exists(systems_path):
+        sys_data = load_yaml(systems_path)
+        for sys_id, entry in sys_data.items():
+            name = entry.get("solarSystemNameID") or entry.get("solarSystemName") or entry.get("name", "")
+            if isinstance(name, dict):
+                name = name.get("en") or ""
+            if not name and isinstance(entry, dict):
+                n = _localized_name(entry.get("name", ""))
+                name = n[0] or ""
+            sys_names[int(sys_id)] = str(name)
+
+    planet_names: dict = {}
+    planets_data = load_yaml(planets_path)
     rows = []
-    for entry in data:
-        item_id = entry.get("itemID")
-        item_name = entry.get("itemName")
-        if item_id is not None and item_name and 40000000 <= int(item_id) < 41000000:
-            rows.append((int(item_id), str(item_name)))
+    for planet_id, entry in planets_data.items():
+        cel_idx = entry.get("celestialIndex")
+        sys_id = entry.get("solarSystemID")
+        if cel_idx is not None and sys_id is not None:
+            sys_name = sys_names.get(int(sys_id), "")
+            if sys_name:
+                name = f"{sys_name} {_roman(int(cel_idx))}"
+                planet_names[int(planet_id)] = name
+                rows.append((int(planet_id), name))
+
+    if os.path.exists(moons_path):
+        moons_data = load_yaml(moons_path)
+        for moon_id, entry in moons_data.items():
+            orbit_id = entry.get("orbitID")
+            orbit_idx = entry.get("orbitIndex")
+            if orbit_id is not None and orbit_idx is not None:
+                planet_name = planet_names.get(int(orbit_id), "")
+                if planet_name:
+                    rows.append((int(moon_id), f"{planet_name} - Moon {orbit_idx}"))
+
     conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} celestial names inserted")
