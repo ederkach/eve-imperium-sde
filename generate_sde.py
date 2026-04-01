@@ -1104,10 +1104,19 @@ def _parse_system(args):
 
     planets = sys_data.get("planets", {}) or {}
     planet_counts = {col: 0 for col in ["temperate", "barren", "oceanic", "ice", "gas", "lava", "storm", "plasma"]}
-    for _, planet_data in planets.items():
+    celestial_rows = []
+    for planet_id, planet_data in planets.items():
         col = PLANET_TYPE_TO_COLUMN.get(planet_data.get("typeID"))
         if col:
             planet_counts[col] += 1
+        cel_idx = planet_data.get("celestialIndex")
+        if cel_idx is not None:
+            planet_name = f"{sys_name} {_roman(int(cel_idx))}"
+            celestial_rows.append((int(planet_id), planet_name))
+            for moon_id, moon_data in (planet_data.get("moons", {}) or {}).items():
+                moon_idx = moon_data.get("moonIndex") or moon_data.get("orbitIndex")
+                if moon_idx is not None:
+                    celestial_rows.append((int(moon_id), f"{planet_name} - Moon {moon_idx}"))
 
     sys_row = (int(sys_id), sys_name, None, sys_name, None, None, None, None, None, None, security)
     univ_row = (
@@ -1119,7 +1128,7 @@ def _parse_system(args):
         planet_counts["gas"], planet_counts["lava"],
         planet_counts["storm"], planet_counts["plasma"],
     )
-    return sys_row, univ_row
+    return sys_row, univ_row, celestial_rows
 
 
 def _localized_name(name_obj, default: str = "") -> tuple:
@@ -1169,8 +1178,10 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
                 const_to_region[int(const_id)] = int(rid)
 
     systems_data = load_yaml(systems_path)
+    celestial_rows = []
     for sys_id, entry in systems_data.items():
         n = _localized_name(entry.get("name", ""))
+        sys_name = n[0] or ""
         sec = entry.get("securityStatus") or entry.get("security") or 0.0
         sys_rows.append((int(sys_id), n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], sec))
 
@@ -1188,12 +1199,20 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
             0, 0, 0, 0, 0, 0, 0, 0
         ))
 
+        planets = entry.get("planets", {}) or {}
+        for planet_id, planet_data in planets.items():
+            cel_idx = planet_data.get("celestialIndex")
+            if cel_idx is not None and sys_name:
+                planet_name = f"{sys_name} {_roman(int(cel_idx))}"
+                celestial_rows.append((int(planet_id), planet_name))
+
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
     conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
     conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
+    conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?)", celestial_rows)
     conn.commit()
-    log(f"  {len(region_rows)} regions, {len(const_rows)} constellations, {len(sys_rows)} solar systems inserted")
+    log(f"  {len(region_rows)} regions, {len(const_rows)} constellations, {len(sys_rows)} solar systems, {len(celestial_rows)} celestials inserted")
 
 
 def insert_universe(conn: sqlite3.Connection, sde_dir: str):
@@ -1244,18 +1263,21 @@ def insert_universe(conn: sqlite3.Connection, sde_dir: str):
 
     sys_rows = []
     univ_rows = []
+    celestial_rows = []
     with ThreadPoolExecutor(max_workers=16) as ex:
         for result in ex.map(_parse_system, system_tasks):
             if result:
                 sys_rows.append(result[0])
                 univ_rows.append(result[1])
+                celestial_rows.extend(result[2])
 
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
     conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
     conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
+    conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?)", celestial_rows)
     conn.commit()
-    log(f"  {len(sys_rows)} solar systems inserted")
+    log(f"  {len(sys_rows)} solar systems, {len(celestial_rows)} celestials inserted")
 
 
 def _roman(n: int) -> str:
