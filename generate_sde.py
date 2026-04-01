@@ -1280,6 +1280,25 @@ def insert_universe(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(sys_rows)} solar systems, {len(celestial_rows)} celestials inserted")
 
 
+def insert_celestial_names(conn: sqlite3.Connection, sde_dir: str):
+    """Populate celestialNames from bsd/invNames.yaml (planet + moon IDs 40xxxxxx)."""
+    inv_names_path = os.path.join(sde_dir, "bsd", "invNames.yaml")
+    if not os.path.exists(inv_names_path):
+        log("SKIP insert_celestial_names: bsd/invNames.yaml not found")
+        return
+    log("Inserting celestial names from bsd/invNames.yaml...")
+    data = load_yaml(inv_names_path)
+    rows = []
+    for entry in data:
+        item_id = entry.get("itemID")
+        item_name = entry.get("itemName")
+        if item_id is not None and item_name and 40000000 <= int(item_id) < 41000000:
+            rows.append((int(item_id), str(item_name)))
+    conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?)", rows)
+    conn.commit()
+    log(f"  {len(rows)} celestial names inserted")
+
+
 def _roman(n: int) -> str:
     vals = [(1000,'M'),(900,'CM'),(500,'D'),(400,'CD'),(100,'C'),(90,'XC'),
             (50,'L'),(40,'XL'),(10,'X'),(9,'IX'),(5,'V'),(4,'IV'),(1,'I')]
@@ -1962,6 +1981,7 @@ def main():
     insert_dogma_effects(conn, sde_dir)
     insert_types_dogma(conn, sde_dir)
     insert_universe(conn, sde_dir)
+    insert_celestial_names(conn, sde_dir)
     insert_stations(conn, sde_dir)
     militia_map = insert_factions(conn, sde_dir)
     insert_npc_corporations(conn, sde_dir, militia_map)
