@@ -824,6 +824,132 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
     log(f"  {len(data)} types inserted")
 
     insert_traits(conn, data, sde_dir)
+    populate_npc_ship_data(conn)
+
+
+ENTITY_CATEGORY_ID = 11
+
+SCENE_PREFIXES = [
+    ("Asteroid ", "Asteroid"),
+    ("Deadspace ", "Deadspace"),
+    ("Mission ", "Mission"),
+    ("Storyline ", "Storyline"),
+    ("Storyline Mission ", "Storyline"),
+    ("Incursion ", "Incursion"),
+    ("Abyssal ", "Abyssal"),
+    ("Faction Warfare ", "Faction Warfare"),
+    ("FW ", "Faction Warfare"),
+]
+
+KNOWN_FACTIONS = [
+    "Angel Cartel", "Blood Raider", "Blood Raiders", "Guristas", "Sansha",
+    "Serpentis", "Rogue Drone", "Sleeper", "Drifter", "CONCORD", "Mordu",
+    "Amarr Empire", "Caldari State", "Gallente Federation", "Minmatar Republic",
+    "Khanid", "Thukker", "Generic", "Faction", "Overseer",
+]
+
+KNOWN_SHIP_TYPES = [
+    "Titan", "Supercarrier", "Carrier", "Dreadnought",
+    "Battleship", "Battlecruiser", "BattleCruiser",
+    "Cruiser", "Destroyer", "Frigate", "Hauler", "Drone",
+]
+
+DEFAULT_FACTION_ICON = "faction_500021.png"
+
+FACTION_ICON_MAP = {
+    "Angel Cartel": "faction_500011.png",
+    "Blood Raider": "faction_500012.png",
+    "Blood Raiders": "faction_500012.png",
+    "Guristas": "faction_500010.png",
+    "Sansha": "faction_500019.png",
+    "Serpentis": "faction_500020.png",
+    "Rogue Drone": "faction_500021.png",
+    "Sleeper": "faction_500021.png",
+    "Drifter": "faction_500021.png",
+    "CONCORD": "faction_500006.png",
+    "Mordu": "faction_500018.png",
+    "Amarr Empire": "faction_500003.png",
+    "Caldari State": "faction_500001.png",
+    "Gallente Federation": "faction_500004.png",
+    "Minmatar Republic": "faction_500002.png",
+    "Khanid": "faction_500008.png",
+    "Thukker": "faction_500015.png",
+}
+
+
+def _derive_npc_from_group(group_name: str):
+    if not group_name:
+        return "Other", "Other", "Other", DEFAULT_FACTION_ICON
+
+    scene = "Other"
+    remainder = group_name
+    for prefix, scene_name in SCENE_PREFIXES:
+        if group_name.startswith(prefix):
+            scene = scene_name
+            remainder = group_name[len(prefix):]
+            break
+
+    faction = "Other"
+    for f in sorted(KNOWN_FACTIONS, key=len, reverse=True):
+        if f in remainder:
+            faction = f
+            remainder = remainder.replace(f, "").strip()
+            break
+
+    ship_type = "Other"
+    for t in KNOWN_SHIP_TYPES:
+        if t.lower() in remainder.lower():
+            ship_type = t
+            if ship_type == "BattleCruiser":
+                ship_type = "Cruiser"
+            break
+
+    icon = FACTION_ICON_MAP.get(faction, DEFAULT_FACTION_ICON)
+    return scene, faction, ship_type, icon
+
+
+def populate_npc_ship_data(conn: sqlite3.Connection):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(script_dir, "npc_ship_data.json")
+
+    npc_map = {}
+    if os.path.exists(json_path):
+        with open(json_path, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+        for e in entries:
+            npc_map[e["type_id"]] = (
+                e["npc_ship_scene"],
+                e["npc_ship_faction"],
+                e["npc_ship_type"],
+                e["npc_ship_faction_icon"],
+            )
+        log(f"  Loaded {len(npc_map)} NPC ship mappings from npc_ship_data.json")
+    else:
+        log("  npc_ship_data.json not found — will derive NPC data from group names only")
+
+    cursor = conn.execute(
+        "SELECT type_id, group_name FROM types WHERE category_name = 'Entity'"
+    )
+    entity_types = cursor.fetchall()
+
+    rows = []
+    derived_count = 0
+    for type_id, group_name in entity_types:
+        if type_id in npc_map:
+            scene, faction, ship_type, icon = npc_map[type_id]
+        else:
+            scene, faction, ship_type, icon = _derive_npc_from_group(group_name)
+            derived_count += 1
+        rows.append((scene, faction, ship_type, icon, type_id))
+
+    if rows:
+        conn.executemany(
+            "UPDATE types SET npc_ship_scene=?, npc_ship_faction=?, npc_ship_type=?, npc_ship_faction_icon=? WHERE type_id=?",
+            rows
+        )
+        conn.commit()
+
+    log(f"  {len(rows)} NPC ships classified ({len(rows) - derived_count} from JSON, {derived_count} derived from group names)")
 
 
 def _format_bonus_prefix(bonus_val, unit_id):
