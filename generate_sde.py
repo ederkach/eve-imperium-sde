@@ -379,7 +379,9 @@ def create_schema(conn: sqlite3.Connection):
 
         CREATE TABLE IF NOT EXISTS divisions (
             division_id INTEGER NOT NULL PRIMARY KEY,
-            name TEXT
+            name TEXT,
+            en_name TEXT,
+            ru_name TEXT
         );
 
         CREATE TABLE IF NOT EXISTS agents (
@@ -1751,8 +1753,9 @@ def insert_divisions(conn: sqlite3.Connection, sde_dir: str):
     for div_id, entry in data.items():
         name_dict = entry.get("name", {})
         en_name = name_dict.get("en", "") if isinstance(name_dict, dict) else ""
-        rows.append((int(div_id), en_name))
-    conn.executemany("INSERT OR REPLACE INTO divisions VALUES (?,?)", rows)
+        ru_name = name_dict.get("ru") if isinstance(name_dict, dict) else None
+        rows.append((int(div_id), en_name, en_name, ru_name))
+    conn.executemany("INSERT OR REPLACE INTO divisions VALUES (?,?,?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} divisions")
 
