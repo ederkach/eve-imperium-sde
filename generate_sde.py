@@ -1675,33 +1675,86 @@ def insert_npc_corporations(conn: sqlite3.Connection, sde_dir: str, militia_corp
 
 
 def insert_agents(conn: sqlite3.Connection, sde_dir: str):
-    path = fsd_path(sde_dir, "agents.yaml")
+    npc_path = fsd_path(sde_dir, "npcCharacters.yaml")
+    old_path = fsd_path(sde_dir, "agents.yaml")
+
+    if os.path.exists(npc_path):
+        log("Inserting agents from npcCharacters.yaml...")
+        data = load_yaml(npc_path)
+
+        space_agents = {}
+        space_path = fsd_path(sde_dir, "agentsInSpace.yaml")
+        if os.path.exists(space_path):
+            space_data = load_yaml(space_path)
+            for aid, entry in space_data.items():
+                space_agents[int(aid)] = entry.get("solarSystemID")
+
+        rows = []
+        for char_id, entry in data.items():
+            if "agent" not in entry:
+                continue
+            aid = int(char_id)
+            agent_info = entry["agent"]
+            name_dict = entry.get("name", {})
+            agent_name = name_dict.get("en") if isinstance(name_dict, dict) else None
+            rows.append((
+                aid,
+                agent_info.get("agentTypeID"),
+                entry.get("corporationID"),
+                agent_info.get("divisionID"),
+                1 if agent_info.get("isLocator") else 0,
+                agent_info.get("level"),
+                entry.get("locationID"),
+                space_agents.get(aid),
+                agent_name,
+            ))
+        conn.executemany("INSERT OR REPLACE INTO agents VALUES (?,?,?,?,?,?,?,?,?)", rows)
+        conn.commit()
+        log(f"  {len(rows)} agents")
+
+    elif os.path.exists(old_path):
+        log("Inserting agents from agents.yaml (legacy)...")
+        data = load_yaml(old_path)
+
+        names_path = os.path.join(sde_dir, "bsd", "chrNPCCharacters.yaml")
+        agent_names = {}
+        if os.path.exists(names_path):
+            name_data = load_yaml(names_path)
+            for entry in name_data:
+                agent_names[entry.get("characterID")] = entry.get("characterName")
+
+        rows = []
+        for agent_id, entry in data.items():
+            aid = int(agent_id)
+            rows.append((
+                aid,
+                entry.get("agentTypeID"), entry.get("corporationID"),
+                entry.get("divisionID"), entry.get("isLocator", 0),
+                entry.get("level"), entry.get("locationID"),
+                entry.get("solarSystemID"),
+                agent_names.get(aid),
+            ))
+        conn.executemany("INSERT OR REPLACE INTO agents VALUES (?,?,?,?,?,?,?,?,?)", rows)
+        conn.commit()
+        log(f"  {len(rows)} agents")
+    else:
+        log("SKIP: no agents data found (neither npcCharacters.yaml nor agents.yaml)")
+
+
+def insert_divisions(conn: sqlite3.Connection, sde_dir: str):
+    path = fsd_path(sde_dir, "npcCorporationDivisions.yaml")
     if not os.path.exists(path):
         return
-    log("Inserting agents...")
+    log("Inserting divisions...")
     data = load_yaml(path)
-
-    names_path = os.path.join(sde_dir, "bsd", "chrNPCCharacters.yaml")
-    agent_names = {}
-    if os.path.exists(names_path):
-        name_data = load_yaml(names_path)
-        for entry in name_data:
-            agent_names[entry.get("characterID")] = entry.get("characterName")
-
     rows = []
-    for agent_id, entry in data.items():
-        aid = int(agent_id)
-        rows.append((
-            aid,
-            entry.get("agentTypeID"), entry.get("corporationID"),
-            entry.get("divisionID"), entry.get("isLocator", 0),
-            entry.get("level"), entry.get("locationID"),
-            entry.get("solarSystemID"),
-            agent_names.get(aid),
-        ))
-    conn.executemany("INSERT OR REPLACE INTO agents VALUES (?,?,?,?,?,?,?,?,?)", rows)
+    for div_id, entry in data.items():
+        name_dict = entry.get("name", {})
+        en_name = name_dict.get("en", "") if isinstance(name_dict, dict) else ""
+        rows.append((int(div_id), en_name))
+    conn.executemany("INSERT OR REPLACE INTO divisions VALUES (?,?)", rows)
     conn.commit()
-    log(f"  {len(rows)} agents")
+    log(f"  {len(rows)} divisions")
 
 
 def insert_planet_schematics(conn: sqlite3.Connection, sde_dir: str):
@@ -2145,6 +2198,7 @@ def main():
     militia_map = insert_factions(conn, sde_dir)
     insert_npc_corporations(conn, sde_dir, militia_map)
     insert_agents(conn, sde_dir)
+    insert_divisions(conn, sde_dir)
     insert_planet_schematics(conn, sde_dir)
     insert_type_materials(conn, sde_dir)
     insert_blueprints(conn, sde_dir)
