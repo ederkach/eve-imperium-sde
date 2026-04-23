@@ -1357,9 +1357,6 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
                 planet_name = f"{sys_name} {_roman(int(cel_idx))}"
                 celestial_rows.append((int(planet_id), planet_name))
 
-    # For mapSolarSystems.yaml format, stargates are not available in the same way
-    # Stargate data is only in the universe/ directory tree format
-
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
     conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
@@ -1367,6 +1364,28 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
     conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?)", celestial_rows)
     conn.commit()
     log(f"  {len(region_rows)} regions, {len(const_rows)} constellations, {len(sys_rows)} solar systems, {len(celestial_rows)} celestials inserted")
+
+    # Parse stargates from mapStargates.yaml (flat format)
+    stargates_path = fsd_path(sde_dir, "mapStargates.yaml")
+    if os.path.exists(stargates_path):
+        log("Inserting stargates from mapStargates.yaml...")
+        stargates_data = load_yaml(stargates_path)
+        stargate_rows = []
+        systems_with_gates = set()
+        for gate_id, gate_info in stargates_data.items():
+            from_sys = gate_info.get("solarSystemID")
+            dest = gate_info.get("destination", {})
+            to_sys = dest.get("solarSystemID") if dest else None
+            if from_sys and to_sys and from_sys != to_sys:
+                stargate_rows.append((int(from_sys), int(to_sys)))
+                systems_with_gates.add(int(from_sys))
+                systems_with_gates.add(int(to_sys))
+        conn.executemany("INSERT OR REPLACE INTO stargates VALUES (?,?)", stargate_rows)
+        if systems_with_gates:
+            placeholders = ",".join(str(s) for s in systems_with_gates)
+            conn.execute(f"UPDATE universe SET hasJumpGate = 1 WHERE solarsystem_id IN ({placeholders})")
+        conn.commit()
+        log(f"  {len(stargate_rows)} stargate connections, {len(systems_with_gates)} systems with gates")
 
 
 def insert_universe(conn: sqlite3.Connection, sde_dir: str):
