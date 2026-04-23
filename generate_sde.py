@@ -352,6 +352,12 @@ def create_schema(conn: sqlite3.Connection):
             PRIMARY KEY (region_id, constellation_id, solarsystem_id)
         );
 
+        CREATE TABLE IF NOT EXISTS stargates (
+            from_system_id INTEGER NOT NULL,
+            to_system_id INTEGER NOT NULL,
+            PRIMARY KEY (from_system_id, to_system_id)
+        );
+
         CREATE TABLE IF NOT EXISTS stations (
             stationID INTEGER NOT NULL PRIMARY KEY,
             stationTypeID INTEGER, stationName TEXT,
@@ -1228,7 +1234,14 @@ def _parse_system(args):
     y = center[1] if len(center) > 1 else 0
     z = center[2] if len(center) > 2 else 0
     system_type = sys_data.get("sunTypeID", 0)
-    has_gate = 1 if sys_data.get("stargates") else 0
+    stargates_data = sys_data.get("stargates", {}) or {}
+    has_gate = 1 if stargates_data else 0
+
+    stargate_entries = []
+    for gate_id, gate_info in stargates_data.items():
+        dest_gate = gate_info.get("destination")
+        if dest_gate:
+            stargate_entries.append((int(gate_id), int(sys_id), int(dest_gate)))
 
     planets = sys_data.get("planets", {}) or {}
     planet_counts = {col: 0 for col in ["temperate", "barren", "oceanic", "ice", "gas", "lava", "storm", "plasma"]}
@@ -1256,7 +1269,7 @@ def _parse_system(args):
         planet_counts["gas"], planet_counts["lava"],
         planet_counts["storm"], planet_counts["plasma"],
     )
-    return sys_row, univ_row, celestial_rows
+    return sys_row, univ_row, celestial_rows, stargate_entries
 
 
 def _localized_name(name_obj, default: str = "") -> tuple:
@@ -1327,12 +1340,25 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
             0, 0, 0, 0, 0, 0, 0, 0
         ))
 
+        stargates_map = entry.get("stargates", {}) or {}
+        has_gate = 1 if stargates_map else 0
+        if has_gate:
+            univ_rows[-1] = (
+                region_id, const_id, int(sys_id), sec, 0,
+                x, y, z,
+                0, has_gate, is_jspace, 0,
+                0, 0, 0, 0, 0, 0, 0, 0
+            )
+
         planets = entry.get("planets", {}) or {}
         for planet_id, planet_data in planets.items():
             cel_idx = planet_data.get("celestialIndex")
             if cel_idx is not None and sys_name:
                 planet_name = f"{sys_name} {_roman(int(cel_idx))}"
                 celestial_rows.append((int(planet_id), planet_name))
+
+    # For mapSolarSystems.yaml format, stargates are not available in the same way
+    # Stargate data is only in the universe/ directory tree format
 
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
@@ -1392,20 +1418,31 @@ def insert_universe(conn: sqlite3.Connection, sde_dir: str):
     sys_rows = []
     univ_rows = []
     celestial_rows = []
+    all_gate_entries = []  # (gate_id, owner_system_id, dest_gate_id)
     with ThreadPoolExecutor(max_workers=16) as ex:
         for result in ex.map(_parse_system, system_tasks):
             if result:
                 sys_rows.append(result[0])
                 univ_rows.append(result[1])
                 celestial_rows.extend(result[2])
+                all_gate_entries.extend(result[3])
+
+    # Build gate_id -> system_id mapping, then resolve dest_gate -> dest_system
+    gate_to_system = {entry[0]: entry[1] for entry in all_gate_entries}
+    stargate_rows = []
+    for gate_id, from_sys, dest_gate in all_gate_entries:
+        dest_sys = gate_to_system.get(dest_gate)
+        if dest_sys and from_sys != dest_sys:
+            stargate_rows.append((from_sys, dest_sys))
 
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
     conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
     conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
     conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?)", celestial_rows)
+    conn.executemany("INSERT OR REPLACE INTO stargates VALUES (?,?)", stargate_rows)
     conn.commit()
-    log(f"  {len(sys_rows)} solar systems, {len(celestial_rows)} celestials inserted")
+    log(f"  {len(sys_rows)} solar systems, {len(celestial_rows)} celestials, {len(stargate_rows)} stargate connections inserted")
 
 
 def insert_celestial_names(conn: sqlite3.Connection, sde_dir: str):
