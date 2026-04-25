@@ -2003,6 +2003,57 @@ def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(process_rows)} blueprints processed")
 
 
+def insert_dynamic_items(conn: sqlite3.Connection, sde_dir: str):
+    path = fsd_path(sde_dir, "dynamicitemattributes.yaml", "dynamicItemAttributes.yaml")
+    if not os.path.exists(path):
+        log("SKIP: dynamicitemattributes.yaml not found")
+        return
+    log("Inserting dynamic item attributes...")
+    data = load_yaml(path)
+    if not data:
+        return
+
+    attr_rows = []
+    mapping_rows = []
+
+    for type_id, entry in data.items():
+        dyn_attrs = entry.get("dynamicAttributes")
+        if dyn_attrs:
+            for attr_id, vals in dyn_attrs.items():
+                attr_rows.append((
+                    int(type_id),
+                    int(attr_id),
+                    round(vals.get("min", 0.0), 4),
+                    round(vals.get("max", 0.0), 4),
+                ))
+
+        mappings = entry.get("inputOutputMapping")
+        if mappings:
+            for mapping in mappings:
+                resulting_type = mapping.get("resultingType")
+                if resulting_type is None:
+                    continue
+                for applicable_type in mapping.get("applicableTypes", []):
+                    mapping_rows.append((
+                        int(type_id),
+                        int(applicable_type),
+                        int(resulting_type),
+                    ))
+
+    conn.execute("DELETE FROM dynamic_item_attributes")
+    conn.execute("DELETE FROM dynamic_item_mappings")
+    conn.executemany(
+        "INSERT OR REPLACE INTO dynamic_item_attributes (type_id, attribute_id, min_value, max_value) VALUES (?,?,?,?)",
+        attr_rows,
+    )
+    conn.executemany(
+        "INSERT OR REPLACE INTO dynamic_item_mappings (type_id, applicable_type, resulting_type) VALUES (?,?,?)",
+        mapping_rows,
+    )
+    conn.commit()
+    log(f"  {len(attr_rows)} attribute rows, {len(mapping_rows)} mapping rows")
+
+
 def insert_ore_colors(conn: sqlite3.Connection):
     log("Inserting ore_colors...")
     rows = [
@@ -2261,6 +2312,7 @@ def main():
     insert_planet_schematics(conn, sde_dir)
     insert_type_materials(conn, sde_dir)
     insert_blueprints(conn, sde_dir)
+    insert_dynamic_items(conn, sde_dir)
     insert_ore_colors(conn)
     insert_version_info(conn)
 
