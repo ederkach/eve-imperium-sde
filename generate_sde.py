@@ -2017,7 +2017,7 @@ def insert_dynamic_items(conn: sqlite3.Connection, sde_dir: str):
     mapping_rows = []
 
     for type_id, entry in data.items():
-        dyn_attrs = entry.get("dynamicAttributes")
+        dyn_attrs = entry.get("attributeIDs")
         if dyn_attrs:
             for attr_id, vals in dyn_attrs.items():
                 attr_rows.append((
