@@ -1177,6 +1177,8 @@ def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
             effect_category = entry.get("effectCategory")
         if effect_category is None:
             effect_category = entry.get("categoryID")
+        if int(eff_id) == 16:
+            effect_category = 4
 
         effect_name = entry.get("name") or entry.get("effectName")
 
