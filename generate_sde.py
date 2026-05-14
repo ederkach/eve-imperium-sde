@@ -1156,10 +1156,15 @@ def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
     data = load_yaml(path)
     rows = []
     for eff_id, entry in _iter_yaml_entries(data, "effectID"):
-        display = entry.get("displayNameID")
-        display_name = display.get("en") if isinstance(display, dict) else display
+        display = entry.get("displayName") or entry.get("displayNameID")
+        if isinstance(display, dict):
+            display_name = display.get("en")
+        elif isinstance(display, str):
+            display_name = display
+        else:
+            display_name = None
 
-        description_raw = entry.get("descriptionID") or entry.get("description")
+        description_raw = entry.get("description") or entry.get("descriptionID")
         if isinstance(description_raw, dict):
             description = description_raw.get("en")
         elif isinstance(description_raw, str):
@@ -1167,11 +1172,13 @@ def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
         else:
             description = None
 
-        effect_category = entry.get("effectCategory")
+        effect_category = entry.get("effectCategoryID")
         if effect_category is None:
-            effect_category = entry.get("effectCategoryID")
+            effect_category = entry.get("effectCategory")
+        if effect_category is None:
+            effect_category = entry.get("categoryID")
 
-        effect_name = entry.get("effectName") or entry.get("name")
+        effect_name = entry.get("name") or entry.get("effectName")
 
         is_offensive = entry.get("isOffensive")
         if is_offensive is None:
@@ -1182,7 +1189,7 @@ def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
 
         resistance_attr = entry.get("resistanceAttributeID") or entry.get("resistanceID")
 
-        modifier_info = entry.get("modifierInfo")
+        modifier_info = entry.get("modifierInfo") or entry.get("modifierInfos")
         modifier_info_json = json.dumps(modifier_info, separators=(",", ":"), ensure_ascii=False) if modifier_info else None
 
         rows.append((
