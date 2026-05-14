@@ -1096,7 +1096,7 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
     log("Inserting dogmaAttributes...")
     data = load_yaml(path)
     rows = []
-    for attr_id, entry in data.items():
+    for attr_id, entry in _iter_yaml_entries(data, "attributeID"):
         display = entry.get("displayName") or entry.get("displayNameID")
         if isinstance(display, dict):
             display_name = display.get("en")
@@ -1133,6 +1133,21 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
     log(f"  {len(rows)} dogmaAttributes")
 
 
+def _iter_yaml_entries(data, id_key: str):
+    """Yield (id, entry_dict) pairs from a YAML payload that may be either
+    a top-level {id: entry} dict (legacy CCP SDE) or a list of entry dicts
+    each carrying its id under `id_key` (newer CCP SDE).
+    """
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if isinstance(v, dict):
+                yield k, v
+    elif isinstance(data, list):
+        for v in data:
+            if isinstance(v, dict) and id_key in v:
+                yield v[id_key], v
+
+
 def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
     path = fsd_path(sde_dir, "dogmaEffects.yaml")
     if not os.path.exists(path):
@@ -1140,21 +1155,47 @@ def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
     log("Inserting dogmaEffects...")
     data = load_yaml(path)
     rows = []
-    for eff_id, entry in data.items():
+    for eff_id, entry in _iter_yaml_entries(data, "effectID"):
         display = entry.get("displayNameID")
         display_name = display.get("en") if isinstance(display, dict) else display
 
+        description_raw = entry.get("descriptionID") or entry.get("description")
+        if isinstance(description_raw, dict):
+            description = description_raw.get("en")
+        elif isinstance(description_raw, str):
+            description = description_raw
+        else:
+            description = None
+
+        effect_category = entry.get("effectCategory")
+        if effect_category is None:
+            effect_category = entry.get("effectCategoryID")
+
+        effect_name = entry.get("effectName") or entry.get("name")
+
+        is_offensive = entry.get("isOffensive")
+        if is_offensive is None:
+            is_offensive = entry.get("offensive", False)
+        is_assistance = entry.get("isAssistance")
+        if is_assistance is None:
+            is_assistance = entry.get("assistance", False)
+
+        resistance_attr = entry.get("resistanceAttributeID") or entry.get("resistanceID")
+
+        modifier_info = entry.get("modifierInfo")
+        modifier_info_json = json.dumps(modifier_info, separators=(",", ":"), ensure_ascii=False) if modifier_info else None
+
         rows.append((
             int(eff_id),
-            entry.get("effectCategory"), entry.get("effectName"), display_name,
-            None, bool(entry.get("published", False)),
-            bool(entry.get("isAssistance", False)),
-            bool(entry.get("isOffensive", False)),
-            entry.get("resistanceAttributeID"), None,
+            effect_category, effect_name, display_name,
+            description, bool(entry.get("published", False)),
+            bool(is_assistance),
+            bool(is_offensive),
+            resistance_attr, modifier_info_json,
         ))
     conn.executemany("INSERT OR REPLACE INTO dogmaEffects VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
-    log(f"  {len(rows)} dogmaEffects")
+    log(f"  {len(rows)} dogmaEffects (with modifier_info: {sum(1 for r in rows if r[9])})")
 
 
 def insert_types_dogma(conn: sqlite3.Connection, sde_dir: str):
@@ -1174,10 +1215,18 @@ def insert_types_dogma(conn: sqlite3.Connection, sde_dir: str):
     effect_rows = []
     skill_req_rows = []
 
-    for type_id_raw, entry in data.items():
+    for type_id_raw, entry in _iter_yaml_entries(data, "typeID"):
         type_id = int(type_id_raw)
-        attrs = {a["attributeID"]: a["value"] for a in entry.get("dogmaAttributes", [])}
-        effects = entry.get("dogmaEffects", [])
+        raw_attrs = entry.get("dogmaAttributes", [])
+        if isinstance(raw_attrs, dict):
+            attrs = {int(k): v for k, v in raw_attrs.items()}
+        else:
+            attrs = {a["attributeID"]: a["value"] for a in raw_attrs if isinstance(a, dict) and "attributeID" in a}
+        raw_effects = entry.get("dogmaEffects", [])
+        if isinstance(raw_effects, dict):
+            effects = [{"effectID": int(k), "isDefault": bool(v.get("isDefault", False)) if isinstance(v, dict) else False} for k, v in raw_effects.items()]
+        else:
+            effects = [e for e in raw_effects if isinstance(e, dict) and "effectID" in e]
 
         for attr_id, value in attrs.items():
             attr_rows.append((type_id, attr_id, value))
