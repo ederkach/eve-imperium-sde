@@ -1221,8 +1221,11 @@ def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
         # MWD/AB sig-radius, missile damage spec bonuses, etc.). Their effect rows exist but
         # without modifierInfo the dogma resolver can't apply them. iOS / Pyfa ship a manual
         # patches file with the missing JSON; we use the same file (vendored alongside this
-        # script as dogma_effect_patches.json).
-        if not modifier_info_json and effect_name and effect_name in DOGMA_EFFECT_PATCHES:
+        # script as dogma_effect_patches.json). The patch always wins — some effects (e.g.
+        # missileDMGBonus for BCS) ship with a non-empty but unusable modifierInfo (domain=charID
+        # targeting attr 212, which the EVE client resolves internally via a character entity
+        # our dogma resolver does not model). For those we must replace, not just fill in.
+        if effect_name and effect_name in DOGMA_EFFECT_PATCHES:
             modifier_info_json = DOGMA_EFFECT_PATCHES[effect_name]
 
         rows.append((
