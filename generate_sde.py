@@ -1148,6 +1148,28 @@ def _iter_yaml_entries(data, id_key: str):
                 yield v[id_key], v
 
 
+def _load_dogma_effect_patches() -> dict:
+    patch_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dogma_effect_patches.json")
+    if not os.path.exists(patch_path):
+        return {}
+    try:
+        with open(patch_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    out = {}
+    for entry in data:
+        name = entry.get("effect_name")
+        mi = entry.get("modifier_info")
+        if not name or not mi:
+            continue
+        out[name] = json.dumps(mi, separators=(",", ":"), ensure_ascii=False)
+    return out
+
+
+DOGMA_EFFECT_PATCHES = _load_dogma_effect_patches()
+
+
 def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
     path = fsd_path(sde_dir, "dogmaEffects.yaml")
     if not os.path.exists(path):
@@ -1193,6 +1215,15 @@ def insert_dogma_effects(conn: sqlite3.Connection, sde_dir: str):
 
         modifier_info = entry.get("modifierInfo") or entry.get("modifierInfos")
         modifier_info_json = json.dumps(modifier_info, separators=(",", ":"), ensure_ascii=False) if modifier_info else None
+
+        # CCP's dogmaEffects.yaml leaves modifierInfo empty for a handful of "auto-generated"
+        # effects (selfRof for missile launcher specs, droneDmgBonus, microJumpDrive, AAR,
+        # MWD/AB sig-radius, missile damage spec bonuses, etc.). Their effect rows exist but
+        # without modifierInfo the dogma resolver can't apply them. iOS / Pyfa ship a manual
+        # patches file with the missing JSON; we use the same file (vendored alongside this
+        # script as dogma_effect_patches.json).
+        if not modifier_info_json and effect_name and effect_name in DOGMA_EFFECT_PATCHES:
+            modifier_info_json = DOGMA_EFFECT_PATCHES[effect_name]
 
         rows.append((
             int(eff_id),
