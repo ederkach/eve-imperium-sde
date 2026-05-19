@@ -55,6 +55,40 @@ jobs:
           curl -L -o /tmp/sde.zip \
             https://developers.eveonline.com/static-data/eve-online-static-data-latest-yaml.zip
 
+      - name: Probe CCP build & determine patch
+        id: sde_version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BUILD=$(curl -fsSL "https://esi.evetech.net/latest/status/" | python3 -c "import sys, json; print(json.load(sys.stdin).get('server_version', 0))")
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
+          echo "Probed CCP build: $BUILD"
+          # Count prior releases on this build. patch = max(existing) + 1.
+          # Tag schemes recognised: "sde-<build>" (legacy, patch=0) and "sde-<build>-p<patch>".
+          PATCH=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" \
+            | python3 -c "
+          import sys, json, re
+          d = json.load(sys.stdin)
+          build = '$BUILD'
+          patches = []
+          for r in d:
+              t = r.get('tag_name', '')
+              if t == f'sde-{build}':
+                  patches.append(0)
+              m = re.match(rf'^sde-{build}-p(\d+)$', t)
+              if m:
+                  patches.append(int(m.group(1)))
+          print(max(patches) + 1 if patches else 0)
+          ")
+          echo "patch=$PATCH" >> $GITHUB_OUTPUT
+          if [ "$PATCH" = "0" ]; then
+            echo "tag=sde-$BUILD" >> $GITHUB_OUTPUT
+          else
+            echo "tag=sde-$BUILD-p$PATCH" >> $GITHUB_OUTPUT
+          fi
+          echo "Patch: $PATCH"
+
       - name: Generate SQLite database
         run: |
           RU_FLAG=""
@@ -64,15 +98,9 @@ jobs:
           python3 generate_sde.py \
             --sde-zip /tmp/sde.zip \
             --out item_db_en.sqlite \
+            --patch ${{ steps.sde_version.outputs.patch }} \
             $RU_FLAG \
             --workers 20
-
-      - name: Get build number from DB
-        id: sde_version
-        run: |
-          BUILD=$(python3 -c "import sqlite3, time; c=sqlite3.connect('item_db_en.sqlite'); row=c.execute('SELECT build_number FROM version_info LIMIT 1').fetchone(); print(row[0] if row and row[0] else int(time.time()))")
-          echo "build=$BUILD" >> $GITHUB_OUTPUT
-          echo "SDE build: $BUILD"
 
       - name: Cache EVE game files
         if: inputs.build_icons != 'false'
@@ -104,12 +132,13 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: sde-${{ steps.sde_version.outputs.build }}
-          name: SDE ${{ steps.sde_version.outputs.build }}
+          tag_name: ${{ steps.sde_version.outputs.tag }}
+          name: SDE ${{ steps.sde_version.outputs.build }}${{ steps.sde_version.outputs.patch != '0' && format(' patch {0}', steps.sde_version.outputs.patch) || '' }}
           body: |
-            EVE SDE database build ${{ steps.sde_version.outputs.build }}
+            EVE SDE database build ${{ steps.sde_version.outputs.build }}, patch ${{ steps.sde_version.outputs.patch }}
 
-            Generated from CCP Static Data Export on ${{ github.run_id }}
+            Generated from CCP Static Data Export on ${{ github.run_id }}.
+            Apps compare (build, patch) — an update notification fires when either advances.
           files: |
             item_db_en.zip
             icons.zip

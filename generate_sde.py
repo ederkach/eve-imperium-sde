@@ -2224,7 +2224,7 @@ def insert_ore_colors(conn: sqlite3.Connection):
     log(f"  {len(rows)} ore colors")
 
 
-def insert_version_info(conn: sqlite3.Connection):
+def insert_version_info(conn: sqlite3.Connection, patch_number: int = 0):
     log("Fetching version info from ESI...")
     status = esi_get(f"{ESI_BASE}/status/")
     if status:
@@ -2234,11 +2234,11 @@ def insert_version_info(conn: sqlite3.Connection):
         except (TypeError, ValueError):
             build_int = 0
         conn.execute(
-            "INSERT OR REPLACE INTO version_info (id, build_number, patch_number, release_date, build_key) VALUES (1, ?, 0, ?, 'sde')",
-            (build_int, status.get("start_time")),
+            "INSERT OR REPLACE INTO version_info (id, build_number, patch_number, release_date, build_key) VALUES (1, ?, ?, ?, 'sde')",
+            (build_int, patch_number, status.get("start_time")),
         )
         conn.commit()
-        log(f"  build_number = {build_int}")
+        log(f"  build_number = {build_int}, patch_number = {patch_number}")
     else:
         log("  ESI unreachable — version_info skipped")
 
@@ -2322,6 +2322,8 @@ def main():
     parser.add_argument("--out", default=DEFAULT_OUT, help=f"Output path (default: {DEFAULT_OUT})")
     parser.add_argument("--ru-descriptions", action="store_true", help="Fetch Russian descriptions from ESI")
     parser.add_argument("--workers", type=int, default=30, help="Worker threads for ESI fetching")
+    parser.add_argument("--patch", type=int, default=int(os.environ.get("SDE_PATCH", "0")),
+                        help="Patch number for this regeneration (bumps when we ship fixes on the same CCP build)")
     args = parser.parse_args()
 
     sde_dir = args.sde_dir
@@ -2403,7 +2405,7 @@ def main():
     insert_blueprints(conn, sde_dir)
     insert_dynamic_items(conn, sde_dir)
     insert_ore_colors(conn)
-    insert_version_info(conn)
+    insert_version_info(conn, patch_number=args.patch)
 
     if args.ru_descriptions:
         fetch_ru_descriptions(conn, args.workers)
