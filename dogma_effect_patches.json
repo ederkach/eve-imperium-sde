@@ -197,5 +197,25 @@
                 "skillTypeID": -1
             }
         ]
+    },
+    {
+        "_comment": "BCS / Magnetic Field Stabilizer / Heat Sink / Gyrostab / Tracking Enhancer style modules. CCP ships missileDMGBonus (effect 763) with domain=charID and ItemModifier targeting attr 212 — the EVE client multiplies charge damage by character.missileDamageMultiplier internally. Our engine has no character entity, so we mirror Pyfa Effect763.handler: POST_MUL all 4 damage types on charges requiring Missile Launcher Operation (3319) by the module's attr 213.",
+        "effect_name": "missileDMGBonus",
+        "modifier_info": [
+            { "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 114, "modifyingAttributeID": 213, "operation": 4, "skillTypeID": 3319 },
+            { "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 116, "modifyingAttributeID": 213, "operation": 4, "skillTypeID": 3319 },
+            { "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 117, "modifyingAttributeID": 213, "operation": 4, "skillTypeID": 3319 },
+            { "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 118, "modifyingAttributeID": 213, "operation": 4, "skillTypeID": 3319 }
+        ]
+    },
+    {
+        "_comment": "missileDMGBonusPassive (effect 2851) — used by some passive BCS-like rigs. Same shape.",
+        "effect_name": "missileDMGBonusPassive",
+        "modifier_info": [
+            { "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 114, "modifyingAttributeID": 213, "operation": 4, "skillTypeID": 3319 },
+            { "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 116, "modifyingAttributeID": 213, "operation": 4, "skillTypeID": 3319 },
+            { "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 117, "modifyingAttributeID": 213, "operation": 4, "skillTypeID": 3319 },
+            { "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 118, "modifyingAttributeID": 213, "operation": 4, "skillTypeID": 3319 }
+        ]
     }
-] 
+]
