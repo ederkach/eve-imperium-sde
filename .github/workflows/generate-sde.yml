@@ -13,8 +13,6 @@ on:
         required: false
         default: 'true'
         type: boolean
-  schedule:
-    - cron: '0 6 * * 1'
 
 jobs:
   generate:
