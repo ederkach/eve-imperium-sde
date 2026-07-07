@@ -44,14 +44,14 @@ ESI_BASE = "https://esi.evetech.net/latest"
 DEFAULT_OUT = "composeApp/src/commonMain/composeResources/files/item_db_en.sqlite"
 
 PLANET_TYPE_TO_COLUMN = {
-    2016: "temperate",
-    2015: "oceanic",
-    2017: "ice",
-    2063: "gas",
-    13:   "lava",
-    11:   "barren",
-    2025: "storm",
-    2024: "plasma",
+    11: "temperate", 56023: "temperate",
+    12: "ice",       56019: "ice",
+    13: "gas",
+    2014: "oceanic", 56021: "oceanic",
+    2015: "lava",    56020: "lava",
+    2016: "barren",  56018: "barren",
+    2017: "storm",   56024: "storm",
+    2063: "plasma",  56022: "plasma",
 }
 
 SKILL_REQ_ATTR_PAIRS = [
