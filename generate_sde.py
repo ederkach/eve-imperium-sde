@@ -41,6 +41,7 @@ except ImportError:
     sys.exit(1)
 
 SDE_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
+RATE_LIMIT_BACKOFF = 2.0
 ESI_BASE = "https://esi.evetech.net/latest"
 DEFAULT_OUT = "composeApp/src/commonMain/composeResources/files/item_db_en.sqlite"
 
@@ -2312,58 +2313,112 @@ def insert_version_info(conn: sqlite3.Connection, patch_number: int = 0):
 def fetch_descriptions(conn: sqlite3.Connection, langs, workers: int):
     """Backfill localized type descriptions from ESI.
 
-    The FSD yaml already carries `description` as a per-language dict, so this only
-    covers published types CCP left blank there — usually a short tail, occasionally
-    everything if a future SDE format drops the translations again.
+    The SDE already carries `description` as a per-language dict, so this only covers published types
+    CCP left blank there.
+
+    Both languages go into **one** queue rather than a pass each: the work is identical in shape, so
+    running them separately left the pool half-idle for the second half of the job. Each worker keeps a
+    requests.Session, because every one of these is a GET to the same host and opening a fresh TLS
+    connection per request was costing more than the response itself.
     """
+    import http.client
     import ssl
+    import threading
+    import time
+    from urllib.parse import quote
+
+    # ponytail: verification stays off, as it was before this rewrite — Python without certifi cannot
+    # verify esi.evetech.net and the generator would stop dead on a developer machine. Pre-existing
+    # debt, not part of this change; the fix is to depend on certifi and drop this context.
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
+    jobs = []
     for lang in langs:
         col = f"description_{lang}"
         cur = conn.cursor()
         cur.execute(
             f"SELECT type_id FROM types WHERE published = 1 AND ({col} IS NULL OR {col} = '')"
         )
-        type_ids = [row[0] for row in cur.fetchall()]
-        if not type_ids:
-            log(f"{col}: already complete from the SDE yaml, nothing to fetch")
-            continue
-        log(f"Fetching {len(type_ids)} missing {col} values from ESI...")
+        ids = [row[0] for row in cur.fetchall()]
+        if ids:
+            jobs.extend((lang, tid) for tid in ids)
+        else:
+            log(f"{col}: already complete from the SDE, nothing to fetch")
 
-        def fetch_one(type_id, lang=lang):
-            url = f"{ESI_BASE}/universe/types/{type_id}/?language={lang}"
+    if not jobs:
+        return
+
+    log(f"Fetching {len(jobs)} missing descriptions from ESI ({', '.join(langs)}) on {workers} workers...")
+
+    host = ESI_BASE.split("//", 1)[1].split("/", 1)[0]
+    base_path = "/" + ESI_BASE.split("//", 1)[1].split("/", 1)[1].strip("/")
+    local = threading.local()
+    rate_limited = threading.Event()
+
+    def connection(fresh=False):
+        """One kept-alive connection per worker.
+
+        http.client rather than requests: this needs no third-party package, and the whole win here is
+        simply not repeating a TLS handshake for every one of thousands of GETs to the same host.
+        """
+        conn_ = getattr(local, "conn", None)
+        if fresh and conn_ is not None:
+            conn_.close()
+            conn_ = None
+        if conn_ is None:
+            conn_ = http.client.HTTPSConnection(host, timeout=15, context=ctx)
+            local.conn = conn_
+        return conn_
+
+    def fetch_one(job):
+        lang, type_id = job
+        path = f"{base_path}/universe/types/{type_id}/?language={quote(lang)}"
+        for attempt in range(4):
             try:
-                req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
-                    d = json.loads(r.read())
-                    return type_id, d.get("description") or ""
+                c = connection(fresh=attempt > 0)
+                c.request("GET", path, headers={"Accept": "application/json", "Connection": "keep-alive"})
+                resp = c.getresponse()
+                body = resp.read()
+                if resp.status == 200:
+                    return lang, type_id, json.loads(body).get("description") or ""
+                # 420 is ESI's rate limit. Treating it as "this type has no description" is how a
+                # throttled run silently ships a database with holes in it, so back off and retry
+                # instead — the whole job is worth more than the seconds this costs.
+                if resp.status == 420:
+                    rate_limited.set()
+                    time.sleep(RATE_LIMIT_BACKOFF * (attempt + 1))
+                    continue
+                # A real 404 for an unpublished type is not worth retrying.
+                return lang, type_id, None
             except Exception:
-                return type_id, None
+                # A pooled connection can be closed by the server between requests; retrying on a
+                # fresh socket separates that from a genuine failure.
+                continue
+        return lang, type_id, None
 
-        results = {}
-        failed = []
-        done = 0
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = {ex.submit(fetch_one, tid): tid for tid in type_ids}
-            for future in as_completed(futures):
-                tid, desc = future.result()
-                done += 1
-                if desc is not None:
-                    results[tid] = desc
-                else:
-                    failed.append(tid)
-                if done % 500 == 0:
-                    log(f"  {done}/{len(type_ids)} done...")
+    results = {lang: [] for lang in langs}
+    failed = 0
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for lang, tid, desc in ex.map(fetch_one, jobs):
+            done += 1
+            if desc is None:
+                failed += 1
+            else:
+                results[lang].append((desc, tid))
+            if done % 2000 == 0:
+                log(f"  {done}/{len(jobs)} done...")
 
-        conn.executemany(
-            f"UPDATE types SET {col} = ? WHERE type_id = ?",
-            [(desc, tid) for tid, desc in results.items()],
-        )
-        conn.commit()
-        log(f"  {col}: {len(results)} OK, {len(failed)} failed")
+    for lang, rows in results.items():
+        if rows:
+            conn.executemany(f"UPDATE types SET description_{lang} = ? WHERE type_id = ?", rows)
+    conn.commit()
+    ok = sum(len(v) for v in results.values())
+    log(f"  {ok} OK, {failed} failed")
+    if rate_limited.is_set():
+        log(f"  ESI rate-limited this run at {workers} workers; lower --workers if failures appear")
 
 
 def create_indexes(conn: sqlite3.Connection):
