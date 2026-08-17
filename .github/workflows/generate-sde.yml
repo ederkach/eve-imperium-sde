@@ -3,15 +3,15 @@ name: Generate SDE Database
 on:
   workflow_dispatch:
     inputs:
-      ru_descriptions:
-        description: 'Fetch Russian descriptions from ESI (adds ~30 min)'
+      fetch_descriptions:
+        description: 'Backfill ru/zh descriptions from ESI where the SDE has none'
         required: false
-        default: 'true'
+        default: true
         type: boolean
       build_icons:
         description: 'Generate type icons from EVE game cache'
         required: false
-        default: 'true'
+        default: true
         type: boolean
 
 jobs:
@@ -45,13 +45,13 @@ jobs:
         id: sde-cache
         with:
           path: /tmp/sde.zip
-          key: sde-${{ steps.date.outputs.week }}
+          key: sde-jsonl-${{ steps.date.outputs.week }}
 
       - name: Download SDE
         if: steps.sde-cache.outputs.cache-hit != 'true'
         run: |
           curl -L -o /tmp/sde.zip \
-            https://developers.eveonline.com/static-data/eve-online-static-data-latest-yaml.zip
+            https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip
 
       - name: Probe CCP build & determine patch
         id: sde_version
@@ -89,15 +89,15 @@ jobs:
 
       - name: Generate SQLite database
         run: |
-          RU_FLAG=""
-          if [ "${{ inputs.ru_descriptions }}" = "true" ]; then
-            RU_FLAG="--ru-descriptions"
+          DESC_FLAG=""
+          if [ "${{ inputs.fetch_descriptions }}" = "true" ]; then
+            DESC_FLAG="--fetch-descriptions"
           fi
           python3 generate_sde.py \
             --sde-zip /tmp/sde.zip \
             --out item_db_en.sqlite \
             --patch ${{ steps.sde_version.outputs.patch }} \
-            $RU_FLAG \
+            $DESC_FLAG \
             --workers 20
 
       - name: Cache EVE game files

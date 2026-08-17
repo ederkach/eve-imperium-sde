@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 EVE Imperium — SDE Generator
-Builds item_db_en.sqlite from the CCP Static Data Export (SDE) YAML files.
+Builds item_db_en.sqlite from the CCP Static Data Export (SDE).
 
 Usage:
     python3 scripts/generate_sde.py [options]
@@ -10,8 +10,9 @@ Options:
     --sde-zip PATH        Path to already-downloaded sde.zip (skips download)
     --sde-dir PATH        Path to already-extracted sde/ directory (skips download+extract)
     --out PATH            Output SQLite path (default: composeApp/src/commonMain/composeResources/files/item_db_en.sqlite)
-    --ru-descriptions     Fetch Russian descriptions for all types from ESI (slow, ~30 min)
-    --workers N           Thread count for --ru-descriptions (default: 30)
+    --fetch-descriptions  Backfill ru/zh type descriptions from ESI for the ones the SDE
+                          leaves blank (no-op when the SDE is complete)
+    --workers N           Thread count for --fetch-descriptions (default: 30)
 
 Requirements:
     pip install pyyaml requests
@@ -39,7 +40,7 @@ except ImportError:
     print("PyYAML not found. Install with: pip install pyyaml")
     sys.exit(1)
 
-SDE_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-yaml.zip"
+SDE_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
 ESI_BASE = "https://esi.evetech.net/latest"
 DEFAULT_OUT = "composeApp/src/commonMain/composeResources/files/item_db_en.sqlite"
 
@@ -70,7 +71,7 @@ def log(msg):
 
 def download_sde(dest_path: str):
     log(f"Downloading SDE from {SDE_URL} ...")
-    log("This is ~1 GB — may take 10–30 minutes depending on connection.")
+    log("This is ~95 MB.")
 
     def progress(count, block_size, total_size):
         if total_size > 0 and count % 200 == 0:
@@ -90,9 +91,64 @@ def extract_sde(zip_path: str, extract_dir: str):
     log("Extraction complete.")
 
 
+def _rekey(obj):
+    """Rebuild the id-keyed mappings the YAML export had.
+
+    CCP's JSONL writes every id-keyed collection as a list of objects carrying `_key` —
+    at the top level (one record per line) and nested inside records too, e.g. a planet
+    schematic's `types` or a ship's per-skill trait bonuses. Restoring the mapping at every
+    depth means no call site has to know which format was downloaded. Lists of plain
+    values (a schematic's `pins`) and objects without `_key` are left alone.
+
+    Where the YAML value was not itself an object — a list of trait bonuses, say — JSONL
+    wraps it as {"_key": id, "_value": [...]}, so that wrapper is unwrapped back to the
+    bare value.
+    """
+    if isinstance(obj, list):
+        items = [_rekey(o) for o in obj]
+        if items and all(isinstance(o, dict) and "_key" in o for o in items):
+            out = {}
+            for o in items:
+                key = o.pop("_key")
+                out[key] = o["_value"] if set(o) == {"_value"} else o
+            return out
+        return items
+    if isinstance(obj, dict):
+        return {k: _rekey(v) for k, v in obj.items()}
+    return obj
+
+
+def load_jsonl(path: str):
+    """Load CCP's JSONL export of an SDE file into the structure load_yaml would return."""
+    with open(path, "r", encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    return _rekey(rows)
+
+
 def load_yaml(path: str):
+    if path.endswith(".jsonl"):
+        return load_jsonl(path)
     with open(path, "r", encoding="utf-8") as f:
         return yaml.load(f, Loader=YamlLoader)
+
+
+_yaml_cache = {}
+
+
+def load_yaml_cached(path: str):
+    """Memoized load for the mapPlanets/mapMoons/mapSolarSystems trio, which the
+    celestial-name pass and the station-name pass both read end to end — reparsing
+    them cost ~3 minutes per run. Opt-in rather than a blanket lru_cache because
+    these dicts are hundreds of MB each; call drop_yaml_cache() when the map phase
+    is over so they don't sit in RAM for the rest of the build.
+    """
+    if path not in _yaml_cache:
+        _yaml_cache[path] = load_yaml(path)
+    return _yaml_cache[path]
+
+
+def drop_yaml_cache():
+    _yaml_cache.clear()
 
 
 def load_fsd_strings(sde_dir: str) -> dict:
@@ -131,10 +187,12 @@ def load_fsd_strings(sde_dir: str) -> dict:
 
 def fsd_path(sde_dir: str, *names: str) -> str:
     for name in names:
-        for subdir in ("fsd", ""):
-            p = os.path.join(sde_dir, subdir, name) if subdir else os.path.join(sde_dir, name)
-            if os.path.exists(p):
-                return p
+        # .jsonl first: same data, ~75x faster to parse (mapMoons: 2s vs 150s).
+        for candidate in (os.path.splitext(name)[0] + ".jsonl", name):
+            for subdir in ("fsd", ""):
+                p = os.path.join(sde_dir, subdir, candidate) if subdir else os.path.join(sde_dir, candidate)
+                if os.path.exists(p):
+                    return p
     return os.path.join(sde_dir, "fsd", names[0])
 
 
@@ -244,6 +302,7 @@ def create_schema(conn: sqlite3.Connection):
             ru_name TEXT, zh_name TEXT,
             description TEXT,
             description_ru TEXT,
+            description_zh TEXT,
             icon_filename TEXT, bpc_icon_filename TEXT,
             published BOOLEAN, volume REAL, repackaged_volume REAL,
             capacity REAL, mass REAL,
@@ -658,6 +717,13 @@ def insert_groups(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict):
 
 def populate_representative_types(conn: sqlite3.Connection):
     log("Populating representative_type_id for groups and marketGroups...")
+    # Both UPDATEs below are correlated subqueries over types; without these the planner
+    # full-scans 52k types once per group (~200M rows, ~37s). types is fully written by
+    # now and nothing appends to it later, so building the indexes here costs nothing.
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_types_groupID ON types(groupID);
+        CREATE INDEX IF NOT EXISTS idx_types_marketGroupID ON types(marketGroupID);
+    """)
     conn.execute("""
         UPDATE groups SET representative_type_id = (
             SELECT MIN(type_id) FROM types
@@ -750,7 +816,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
     if not os.path.exists(path):
         log("SKIP: fsd/typeIDs.yaml not found")
         return
-    log(f"Inserting types from {os.path.basename(path)} (loading YAML — may take 30–60s)...")
+    log(f"Inserting types from {os.path.basename(path)} ...")
     data = load_yaml(path)
 
     log(f"  Loaded {len(data)} types, building group/category lookup...")
@@ -775,11 +841,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
     for type_id_raw, entry in data.items():
         type_id = int(type_id_raw)
         names = multiname(entry)
-        desc = entry.get("description")
-        if isinstance(desc, dict):
-            desc_en = desc.get("en")
-        else:
-            desc_en = desc
+        descs = multiname(entry, "description")
 
         grp_id = entry.get("groupID")
         gd = group_data.get(grp_id, {})
@@ -792,8 +854,9 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
             names.get("en"), names.get("de"), names.get("en"),
             names.get("es"), names.get("fr"), names.get("ja"),
             names.get("ko"), names.get("ru"), names.get("zh"),
-            desc_en,
-            None,
+            descs.get("en"),
+            descs.get("ru"),
+            descs.get("zh"),
             icon_fn, None,
             bool(entry.get("published", False)),
             entry.get("volume"),
@@ -818,14 +881,14 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
 
         if len(rows) >= 2000:
             conn.executemany(
-                "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 45) + ")",
+                "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 46) + ")",
                 rows
             )
             rows.clear()
 
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 45) + ")",
+            "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 46) + ")",
             rows
         )
     conn.commit()
@@ -1245,7 +1308,7 @@ def insert_types_dogma(conn: sqlite3.Connection, sde_dir: str):
     path = fsd_path(sde_dir, "typesDogma.yaml", "typeDogma.yaml")
     if not os.path.exists(path):
         return
-    log("Inserting typeAttributes and typeSkillRequirements (loading YAML)...")
+    log("Inserting typeAttributes and typeSkillRequirements...")
     data = load_yaml(path)
 
     type_info = {}
@@ -1386,7 +1449,7 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
         log("SKIP: mapSolarSystems.yaml not found")
         return
 
-    log("Inserting universe data from mapXxx.yaml files...")
+    log("Inserting universe data from the mapXxx files...")
     region_rows = []
     const_rows = []
     sys_rows = []
@@ -1570,7 +1633,7 @@ def insert_celestial_names(conn: sqlite3.Connection, sde_dir: str):
 
     sys_names: dict = {}
     if os.path.exists(systems_path):
-        sys_data = load_yaml(systems_path)
+        sys_data = load_yaml_cached(systems_path)
         for sys_id, entry in sys_data.items():
             name = entry.get("solarSystemNameID") or entry.get("solarSystemName") or entry.get("name", "")
             if isinstance(name, dict):
@@ -1581,7 +1644,7 @@ def insert_celestial_names(conn: sqlite3.Connection, sde_dir: str):
             sys_names[int(sys_id)] = str(name)
 
     planet_names: dict = {}
-    planets_data = load_yaml(planets_path)
+    planets_data = load_yaml_cached(planets_path)
     rows = []
     for planet_id, entry in planets_data.items():
         cel_idx = entry.get("celestialIndex")
@@ -1594,7 +1657,7 @@ def insert_celestial_names(conn: sqlite3.Connection, sde_dir: str):
                 rows.append((int(planet_id), name))
 
     if os.path.exists(moons_path):
-        moons_data = load_yaml(moons_path)
+        moons_data = load_yaml_cached(moons_path)
         for moon_id, entry in moons_data.items():
             orbit_id = entry.get("orbitID")
             orbit_idx = entry.get("orbitIndex")
@@ -1620,7 +1683,7 @@ def _roman(n: int) -> str:
 
 def _build_station_names(sde_dir: str) -> dict:
     """Build stationID -> name map from npcStations + supporting YAML files."""
-    log("  Building station names (loading YAML in parallel)...")
+    log("  Building station names...")
     npc_path = fsd_path(sde_dir, "npcStations.yaml")
 
     paths = {
@@ -1634,7 +1697,7 @@ def _build_station_names(sde_dir: str) -> dict:
 
     def _load(key):
         p = paths[key]
-        return (key, load_yaml(p) if os.path.exists(p) else {})
+        return (key, load_yaml_cached(p) if os.path.exists(p) else {})
 
     loaded = {}
     with ThreadPoolExecutor(max_workers=6) as ex:
@@ -1935,7 +1998,7 @@ def insert_planet_schematics(conn: sqlite3.Connection, sde_dir: str):
         facilitys = ",".join(str(p) for p in pins) if pins else None
         rows.append((
             int(sch_id), out_type,
-            entry.get("nameID", {}).get("en") if isinstance(entry.get("nameID"), dict) else None,
+            (multiname(entry, "nameID") or multiname(entry)).get("en"),
             facilitys,
             entry.get("cycleTime"),
             out_qty,
@@ -1987,7 +2050,7 @@ def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
     path = fsd_path(sde_dir, "blueprints.yaml")
     if not os.path.exists(path):
         return
-    log("Inserting blueprints (loading YAML — may take 30s)...")
+    log("Inserting blueprints...")
     data = load_yaml(path)
 
     type_info = {}
@@ -2246,47 +2309,61 @@ def insert_version_info(conn: sqlite3.Connection, patch_number: int = 0):
         log("  ESI unreachable — version_info skipped")
 
 
-def fetch_ru_descriptions(conn: sqlite3.Connection, workers: int):
-    log("Fetching Russian descriptions from ESI...")
-    cur = conn.cursor()
-    cur.execute("SELECT type_id FROM types WHERE published = 1")
-    type_ids = [row[0] for row in cur.fetchall()]
-    log(f"  {len(type_ids)} published types to fetch")
+def fetch_descriptions(conn: sqlite3.Connection, langs, workers: int):
+    """Backfill localized type descriptions from ESI.
 
+    The FSD yaml already carries `description` as a per-language dict, so this only
+    covers published types CCP left blank there — usually a short tail, occasionally
+    everything if a future SDE format drops the translations again.
+    """
     import ssl
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-    def fetch_one(type_id):
-        url = f"{ESI_BASE}/universe/types/{type_id}/?language=ru"
-        try:
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
-                d = json.loads(r.read())
-                return type_id, d.get("description") or ""
-        except Exception:
-            return type_id, None
+    for lang in langs:
+        col = f"description_{lang}"
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT type_id FROM types WHERE published = 1 AND ({col} IS NULL OR {col} = '')"
+        )
+        type_ids = [row[0] for row in cur.fetchall()]
+        if not type_ids:
+            log(f"{col}: already complete from the SDE yaml, nothing to fetch")
+            continue
+        log(f"Fetching {len(type_ids)} missing {col} values from ESI...")
 
-    results = {}
-    failed = []
-    done = 0
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(fetch_one, tid): tid for tid in type_ids}
-        for future in as_completed(futures):
-            tid, desc = future.result()
-            done += 1
-            if desc is not None:
-                results[tid] = desc
-            else:
-                failed.append(tid)
-            if done % 500 == 0:
-                log(f"  {done}/{len(type_ids)} done...")
+        def fetch_one(type_id, lang=lang):
+            url = f"{ESI_BASE}/universe/types/{type_id}/?language={lang}"
+            try:
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+                    d = json.loads(r.read())
+                    return type_id, d.get("description") or ""
+            except Exception:
+                return type_id, None
 
-    for tid, desc in results.items():
-        conn.execute("UPDATE types SET description_ru = ? WHERE type_id = ?", (desc, tid))
-    conn.commit()
-    log(f"  {len(results)} OK, {len(failed)} failed")
+        results = {}
+        failed = []
+        done = 0
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(fetch_one, tid): tid for tid in type_ids}
+            for future in as_completed(futures):
+                tid, desc = future.result()
+                done += 1
+                if desc is not None:
+                    results[tid] = desc
+                else:
+                    failed.append(tid)
+                if done % 500 == 0:
+                    log(f"  {done}/{len(type_ids)} done...")
+
+        conn.executemany(
+            f"UPDATE types SET {col} = ? WHERE type_id = ?",
+            [(desc, tid) for tid, desc in results.items()],
+        )
+        conn.commit()
+        log(f"  {col}: {len(results)} OK, {len(failed)} failed")
 
 
 def create_indexes(conn: sqlite3.Connection):
@@ -2323,7 +2400,8 @@ def main():
     parser.add_argument("--sde-zip", help="Path to sde.zip (skip download)")
     parser.add_argument("--sde-dir", help="Path to extracted sde/ dir (skip download+extract)")
     parser.add_argument("--out", default=DEFAULT_OUT, help=f"Output path (default: {DEFAULT_OUT})")
-    parser.add_argument("--ru-descriptions", action="store_true", help="Fetch Russian descriptions from ESI")
+    parser.add_argument("--fetch-descriptions", action="store_true",
+                        help="Backfill ru/zh descriptions from ESI where the SDE yaml has none")
     parser.add_argument("--workers", type=int, default=30, help="Worker threads for ESI fetching")
     parser.add_argument("--patch", type=int, default=int(os.environ.get("SDE_PATCH", "0")),
                         help="Patch number for this regeneration (bumps when we ship fixes on the same CCP build)")
@@ -2356,7 +2434,7 @@ def main():
             elif os.path.isdir(os.path.join(extract_dir, "fsd")):
                 sde_dir = extract_dir
                 log(f"ZIP extracted flat with fsd/, using {sde_dir} as SDE root")
-            elif any(f.endswith(".yaml") for f in top):
+            elif any(f.endswith((".jsonl", ".yaml")) for f in top):
                 sde_dir = extract_dir
                 log(f"ZIP extracted flat (no fsd/), using {sde_dir} as SDE root")
 
@@ -2369,8 +2447,8 @@ def main():
         fsd_files = sorted(os.listdir(fsd_dir))
         log(f"fsd/ contents ({len(fsd_files)} files): {fsd_files[:30]}")
     else:
-        root_files = sorted(f for f in os.listdir(sde_dir) if f.endswith(".yaml"))
-        log(f"SDE root YAML files ({len(root_files)}): {root_files[:30]}")
+        root_files = sorted(f for f in os.listdir(sde_dir) if f.endswith((".jsonl", ".yaml")))
+        log(f"SDE root data files ({len(root_files)}): {root_files[:30]}")
 
     out_path = args.out
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
@@ -2399,6 +2477,7 @@ def main():
     insert_universe(conn, sde_dir)
     insert_celestial_names(conn, sde_dir)
     insert_stations(conn, sde_dir)
+    drop_yaml_cache()
     militia_map = insert_factions(conn, sde_dir)
     insert_npc_corporations(conn, sde_dir, militia_map)
     insert_agents(conn, sde_dir)
@@ -2410,8 +2489,8 @@ def main():
     insert_ore_colors(conn)
     insert_version_info(conn, patch_number=args.patch)
 
-    if args.ru_descriptions:
-        fetch_ru_descriptions(conn, args.workers)
+    if args.fetch_descriptions:
+        fetch_descriptions(conn, ("ru", "zh"), args.workers)
 
     create_indexes(conn)
 
