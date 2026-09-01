@@ -580,6 +580,7 @@ def create_schema(conn: sqlite3.Connection):
             typeid INTEGER NOT NULL,
             content TEXT NOT NULL,
             content_ru TEXT,
+            content_zh TEXT,
             skill INTEGER NOT NULL DEFAULT -1,
             importance INTEGER, bonus_type TEXT,
             PRIMARY KEY (typeid, content, skill)
@@ -1068,15 +1069,19 @@ def insert_traits(conn: sqlite3.Connection, type_data: dict, sde_dir: str = ""):
             if isinstance(bt, dict):
                 content_en = bt.get("en", "")
                 content_ru = bt.get("ru")
+                content_zh = bt.get("zh")
             elif isinstance(bt, str):
                 content_en = bt
                 content_ru = None
+                content_zh = None
             else:
                 return
             if not content_en:
                 return
             prefix = _format_bonus_prefix(bonus.get("bonus"), bonus.get("unitID"))
-            rows.append((type_id, prefix + content_en, prefix + content_ru if content_ru else None,
+            rows.append((type_id, prefix + content_en,
+                         prefix + content_ru if content_ru else None,
+                         prefix + content_zh if content_zh else None,
                          skill_id, bonus.get("importance", 999999), bonus_type))
 
         for bonus in traits.get("roleBonuses", []):
@@ -1095,7 +1100,7 @@ def insert_traits(conn: sqlite3.Connection, type_data: dict, sde_dir: str = ""):
             _extract_bonus(bonus, -1, "miscBonuses")
 
     conn.executemany(
-        "INSERT OR REPLACE INTO traits (typeid, content, content_ru, skill, importance, bonus_type) VALUES (?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO traits (typeid, content, content_ru, content_zh, skill, importance, bonus_type) VALUES (?,?,?,?,?,?,?)",
         rows
     )
     conn.commit()
