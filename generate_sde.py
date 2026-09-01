@@ -292,7 +292,7 @@ def create_schema(conn: sqlite3.Connection):
 
         CREATE TABLE IF NOT EXISTS metaGroups (
             metagroup_id INTEGER NOT NULL PRIMARY KEY,
-            name TEXT
+            name TEXT, name_ru TEXT, name_zh TEXT
         );
 
         CREATE TABLE IF NOT EXISTS types (
@@ -448,7 +448,8 @@ def create_schema(conn: sqlite3.Connection):
             division_id INTEGER NOT NULL PRIMARY KEY,
             name TEXT,
             en_name TEXT,
-            ru_name TEXT
+            ru_name TEXT,
+            zh_name TEXT
         );
 
         CREATE TABLE IF NOT EXISTS agents (
@@ -461,7 +462,7 @@ def create_schema(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS planetSchematics (
             schematic_id INTEGER NOT NULL,
             output_typeid INTEGER NOT NULL PRIMARY KEY,
-            name TEXT, facilitys TEXT, cycle_time INTEGER,
+            name TEXT, name_ru TEXT, name_zh TEXT, facilitys TEXT, cycle_time INTEGER,
             output_value INTEGER, input_typeid TEXT, input_value TEXT
         );
 
@@ -620,7 +621,7 @@ def create_schema(conn: sqlite3.Connection):
 
         CREATE TABLE IF NOT EXISTS marketGroups (
             group_id INTEGER NOT NULL PRIMARY KEY,
-            name TEXT,
+            name TEXT, name_ru TEXT, name_zh TEXT,
             icon_name TEXT,
             parentgroup_id INTEGER,
             show INTEGER DEFAULT 1,
@@ -768,8 +769,8 @@ def insert_meta_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: dict
         name = names.get("en") or names.get("de") or ""
         if not name:
             name = resolve_name_id(entry.get("nameID"), fsd_strings)
-        rows.append((int(mg_id), name))
-    conn.executemany("INSERT OR REPLACE INTO metaGroups VALUES (?,?)", rows)
+        rows.append((int(mg_id), name, names.get("ru"), names.get("zh")))
+    conn.executemany("INSERT OR REPLACE INTO metaGroups VALUES (?,?,?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} metaGroups")
 
@@ -805,9 +806,9 @@ def insert_market_groups(conn: sqlite3.Connection, sde_dir: str, fsd_strings: di
         icon_id = entry.get("iconID")
         icon_name = icon_filenames.get(int(icon_id)) if icon_id else None
         parent_id = entry.get("parentGroupID")
-        rows.append((gid, name, icon_name, parent_id, 1, None))
+        rows.append((gid, name, names.get("ru"), names.get("zh"), icon_name, parent_id, 1, None))
     conn.executemany(
-        "INSERT OR REPLACE INTO marketGroups VALUES (?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO marketGroups VALUES (?,?,?,?,?,?,?,?)",
         rows
     )
     conn.commit()
@@ -1979,8 +1980,9 @@ def insert_divisions(conn: sqlite3.Connection, sde_dir: str):
         name_dict = entry.get("name", {})
         en_name = name_dict.get("en", "") if isinstance(name_dict, dict) else ""
         ru_name = name_dict.get("ru") if isinstance(name_dict, dict) else None
-        rows.append((int(div_id), en_name, en_name, ru_name))
-    conn.executemany("INSERT OR REPLACE INTO divisions VALUES (?,?,?,?)", rows)
+        zh_name = name_dict.get("zh") if isinstance(name_dict, dict) else None
+        rows.append((int(div_id), en_name, en_name, ru_name, zh_name))
+    conn.executemany("INSERT OR REPLACE INTO divisions VALUES (?,?,?,?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} divisions")
 
@@ -2010,15 +2012,16 @@ def insert_planet_schematics(conn: sqlite3.Connection, sde_dir: str):
             continue
         pins = entry.get("pins", [])
         facilitys = ",".join(str(p) for p in pins) if pins else None
+        sch_names = multiname(entry, "nameID") or multiname(entry)
         rows.append((
             int(sch_id), out_type,
-            (multiname(entry, "nameID") or multiname(entry)).get("en"),
+            sch_names.get("en"), sch_names.get("ru"), sch_names.get("zh"),
             facilitys,
             entry.get("cycleTime"),
             out_qty,
             ",".join(in_types), ",".join(in_qtys),
         ))
-    conn.executemany("INSERT OR REPLACE INTO planetSchematics VALUES (?,?,?,?,?,?,?,?)", rows)
+    conn.executemany("INSERT OR REPLACE INTO planetSchematics VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} planetSchematics")
 
