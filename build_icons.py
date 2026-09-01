@@ -69,7 +69,7 @@ def main():
     sde.close()
     log(f"Loaded {len(data.types)} types")
 
-    log("Building icons (IEC format with type_ prefix, no renders/bpc)...")
+    log("Building icons (IEC format with type_ prefix, blueprint copies included, no renders)...")
     added, removed = build_icon_export(
         output_mode="iec",
         skip_output_if_fresh=False,
@@ -80,7 +80,7 @@ def main():
         silent_mode=False,
         skip_skins=args.skip_skins,
         skip_renders=True,
-        skip_bpc=True,
+        skip_bpc=False,
         out=args.out,
     )
 

@@ -304,7 +304,7 @@ def create_schema(conn: sqlite3.Connection):
             description TEXT,
             description_ru TEXT,
             description_zh TEXT,
-            icon_filename TEXT, bpc_icon_filename TEXT,
+            icon_filename TEXT,
             published BOOLEAN, volume REAL, repackaged_volume REAL,
             capacity REAL, mass REAL,
             marketGroupID INTEGER, metaGroupID INTEGER, iconID INTEGER,
@@ -321,12 +321,13 @@ def create_schema(conn: sqlite3.Connection):
 
         CREATE TABLE IF NOT EXISTS dogmaAttributeCategories (
             attribute_category_id INTEGER NOT NULL PRIMARY KEY,
-            name TEXT, description TEXT
+            name TEXT, name_ru TEXT, name_zh TEXT, description TEXT
         );
 
         CREATE TABLE IF NOT EXISTS dogmaAttributes (
             attribute_id INTEGER NOT NULL PRIMARY KEY,
             categoryID INTEGER, name TEXT, display_name TEXT,
+            display_name_ru TEXT, display_name_zh TEXT,
             tooltipDescription TEXT, iconID INTEGER, icon_filename TEXT,
             unitID INTEGER, stackable BOOLEAN, highIsGood BOOLEAN,
             defaultValue REAL, published BOOLEAN, display_when_zero BOOLEAN
@@ -859,7 +860,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
             descs.get("en"),
             descs.get("ru"),
             descs.get("zh"),
-            icon_fn, None,
+            icon_fn,
             bool(entry.get("published", False)),
             entry.get("volume"),
             entry.get("packagedVolume"),
@@ -883,14 +884,14 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
 
         if len(rows) >= 2000:
             conn.executemany(
-                "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 46) + ")",
+                "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 45) + ")",
                 rows
             )
             rows.clear()
 
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 46) + ")",
+            "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 45) + ")",
             rows
         )
     conn.commit()
@@ -1108,50 +1109,50 @@ def insert_traits(conn: sqlite3.Connection, type_data: dict, sde_dir: str = ""):
 
 
 DOGMA_ATTRIBUTE_CATEGORIES = [
-    (1, "Fitting", "Fitting capabilities of a ship"),
-    (2, "Shield", "Shield attributes of ships"),
-    (3, "Armor", "Armor attributes of ships"),
-    (4, "Structure", "Structure attributes of ships"),
-    (5, "Capacitor", "Capacitor attributes for ships"),
-    (6, "Targeting", "Targeting Attributes for ships"),
-    (7, "Miscellaneous", "Misc. attributes"),
-    (8, "Required Skills", "Skill requirements"),
-    (9, "NULL", "Attributes already checked and not going into a category"),
-    (10, "Drones", "All you need to know about drones"),
-    (12, "AI", "Attribs for the AI configuration"),
-    (17, "Speed and Travel", "Attributes used for velocity, speed and such"),
-    (19, "Loot", "Attributes that affect loot drops"),
-    (20, "Remote Assistance", "Remote shield transfers, armor, structure and such"),
-    (21, "EW - Target Painting", "NPC Target Painting Attributes"),
-    (22, "EW - Energy Neutralizing", "NPC Energy Neutralizing Attributes"),
-    (23, "EW - Remote Electronic Counter Measures", "NPC Remote Electronic Counter Measures Attributes"),
-    (24, "EW - Sensor Dampening", "NPC Sensor Dampening Attributes"),
-    (25, "EW - Target Jamming", "NPC Target Jamming Attributes"),
-    (26, "EW - Tracking Disruption", "NPC Tracking Disruption Attributes"),
-    (27, "EW - Warp Scrambling", "NPC Warp Scrambling Attributes"),
-    (28, "EW - Webbing", "NPC Stasis Webbing Attributes"),
-    (29, "Turrets", "NPC Turrets Attributes"),
-    (30, "Missile", "NPC Missile Attributes"),
-    (31, "Graphics", "NPC Graphic Attributes"),
-    (32, "Entity Rewards", "NPC Entity Rewards Attributes"),
-    (33, "Entity Extra Attributes", "NPC Extra Attributes"),
-    (34, "Fighter Abilities", "Fighter abilities are like built-in modules on fighters"),
-    (36, "EW - Resistance", "Resistances to different types of EWar Effects"),
-    (37, "Bonuses", "Bonuses"),
-    (38, "Fighter Attributes", "Attributes related to fighters (but not abilities)"),
-    (39, "Superweapons", "Attributes relating to Doomsdays and Superweapons"),
-    (40, "Hangars & Bays", "Hangars & Bays"),
-    (41, "On Death", "Attributes relating to the death of a ship"),
-    (42, "Behavior Attributes", "NPC Behavior Attributes"),
-    (51, "Mining", "Mining related attributes"),
-    (52, "Heat", ""),
+    (1, "Fitting", "Мощность и слоты", "装配", "Fitting capabilities of a ship"),
+    (2, "Shield", "Щиты", "护盾", "Shield attributes of ships"),
+    (3, "Armor", "Броня", "装甲", "Armor attributes of ships"),
+    (4, "Structure", "Структура", "结构", "Structure attributes of ships"),
+    (5, "Capacitor", "Конденсатор", "电容", "Capacitor attributes for ships"),
+    (6, "Targeting", "Захват цели", "锁定", "Targeting Attributes for ships"),
+    (7, "Miscellaneous", "Прочее", "其他", "Misc. attributes"),
+    (8, "Required Skills", "Требуемые навыки", "所需技能", "Skill requirements"),
+    (9, "NULL", "NULL", "NULL", "Attributes already checked and not going into a category"),
+    (10, "Drones", "Дроны", "无人机", "All you need to know about drones"),
+    (12, "AI", "ИИ", "AI", "Attribs for the AI configuration"),
+    (17, "Speed and Travel", "Скорость и перемещение", "速度与航行", "Attributes used for velocity, speed and such"),
+    (19, "Loot", "Лут", "掉落物", "Attributes that affect loot drops"),
+    (20, "Remote Assistance", "Удалённая помощь", "远程支援", "Remote shield transfers, armor, structure and such"),
+    (21, "EW - Target Painting", "РЭБ — подсветка цели", "电子战 — 目标标记", "NPC Target Painting Attributes"),
+    (22, "EW - Energy Neutralizing", "РЭБ — нейтрализация энергии", "电子战 — 能量中和", "NPC Energy Neutralizing Attributes"),
+    (23, "EW - Remote Electronic Counter Measures", "РЭБ — удалённое РЭП", "电子战 — 远程电子对抗", "NPC Remote Electronic Counter Measures Attributes"),
+    (24, "EW - Sensor Dampening", "РЭБ — подавление сенсоров", "电子战 — 感应器抑制", "NPC Sensor Dampening Attributes"),
+    (25, "EW - Target Jamming", "РЭБ — глушение захвата", "电子战 — 目标干扰", "NPC Target Jamming Attributes"),
+    (26, "EW - Tracking Disruption", "РЭБ — нарушение наведения", "电子战 — 索敌扰乱", "NPC Tracking Disruption Attributes"),
+    (27, "EW - Warp Scrambling", "РЭБ — глушение варпа", "电子战 — 跃迁扰断", "NPC Warp Scrambling Attributes"),
+    (28, "EW - Webbing", "РЭБ — стазис-сети", "电子战 — 停滞缠绕", "NPC Stasis Webbing Attributes"),
+    (29, "Turrets", "Турели", "炮塔", "NPC Turrets Attributes"),
+    (30, "Missile", "Ракеты", "导弹", "NPC Missile Attributes"),
+    (31, "Graphics", "Графика", "图形", "NPC Graphic Attributes"),
+    (32, "Entity Rewards", "Награды за NPC", "NPC 奖励", "NPC Entity Rewards Attributes"),
+    (33, "Entity Extra Attributes", "Доп. атрибуты NPC", "NPC 额外属性", "NPC Extra Attributes"),
+    (34, "Fighter Abilities", "Способности истребителей", "舰载机能力", "Fighter abilities are like built-in modules on fighters"),
+    (36, "EW - Resistance", "РЭБ — сопротивления", "电子战 — 抗性", "Resistances to different types of EWar Effects"),
+    (37, "Bonuses", "Бонусы", "加成", "Bonuses"),
+    (38, "Fighter Attributes", "Атрибуты истребителей", "舰载机属性", "Attributes related to fighters (but not abilities)"),
+    (39, "Superweapons", "Супероружие", "超级武器", "Attributes relating to Doomsdays and Superweapons"),
+    (40, "Hangars & Bays", "Ангары и отсеки", "机库与舱室", "Hangars & Bays"),
+    (41, "On Death", "При уничтожении", "被摧毁时", "Attributes relating to the death of a ship"),
+    (42, "Behavior Attributes", "Поведение NPC", "NPC 行为", "NPC Behavior Attributes"),
+    (51, "Mining", "Добыча", "采矿", "Mining related attributes"),
+    (52, "Heat", "Перегрев", "过热", ""),
 ]
 
 
 def insert_dogma_attribute_categories(conn: sqlite3.Connection):
     log("Inserting dogmaAttributeCategories...")
     conn.executemany(
-        "INSERT OR REPLACE INTO dogmaAttributeCategories VALUES (?,?,?)",
+        "INSERT OR REPLACE INTO dogmaAttributeCategories VALUES (?,?,?,?,?)",
         DOGMA_ATTRIBUTE_CATEGORIES
     )
     conn.commit()
@@ -1169,10 +1170,16 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
         display = entry.get("displayName") or entry.get("displayNameID")
         if isinstance(display, dict):
             display_name = display.get("en")
+            display_name_ru = display.get("ru")
+            display_name_zh = display.get("zh")
         elif isinstance(display, str):
             display_name = display
+            display_name_ru = None
+            display_name_zh = None
         else:
             display_name = None
+            display_name_ru = None
+            display_name_zh = None
 
         tooltip = entry.get("tooltipDescription") or entry.get("tooltipDescriptionID")
         if isinstance(tooltip, dict):
@@ -1190,6 +1197,7 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
         rows.append((
             int(attr_id),
             category_id, entry.get("name"), display_name,
+            display_name_ru, display_name_zh,
             tooltip_str, icon_id, icon_fn,
             entry.get("unitID"),
             bool(entry.get("stackable", True)),
@@ -1197,7 +1205,7 @@ def insert_dogma_attributes(conn: sqlite3.Connection, sde_dir: str, icon_filenam
             entry.get("defaultValue"), bool(entry.get("published", False)),
             bool(display_when_zero),
         ))
-    conn.executemany("INSERT OR REPLACE INTO dogmaAttributes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    conn.executemany("INSERT OR REPLACE INTO dogmaAttributes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
     log(f"  {len(rows)} dogmaAttributes")
 
