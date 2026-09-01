@@ -304,7 +304,7 @@ def create_schema(conn: sqlite3.Connection):
             description TEXT,
             description_ru TEXT,
             description_zh TEXT,
-            icon_filename TEXT, bpc_icon_filename TEXT,
+            icon_filename TEXT,
             published BOOLEAN, volume REAL, repackaged_volume REAL,
             capacity REAL, mass REAL,
             marketGroupID INTEGER, metaGroupID INTEGER, iconID INTEGER,
@@ -859,7 +859,7 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
             descs.get("en"),
             descs.get("ru"),
             descs.get("zh"),
-            icon_fn, None,
+            icon_fn,
             bool(entry.get("published", False)),
             entry.get("volume"),
             entry.get("packagedVolume"),
@@ -883,14 +883,14 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
 
         if len(rows) >= 2000:
             conn.executemany(
-                "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 46) + ")",
+                "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 45) + ")",
                 rows
             )
             rows.clear()
 
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 46) + ")",
+            "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 45) + ")",
             rows
         )
     conn.commit()
