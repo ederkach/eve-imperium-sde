@@ -56,6 +56,8 @@ PLANET_TYPE_TO_COLUMN = {
     2063: "plasma",  56022: "plasma",
 }
 
+PLANET_COUNT_COLUMNS = ["temperate", "barren", "oceanic", "ice", "gas", "lava", "storm", "plasma"]
+
 SKILL_REQ_ATTR_PAIRS = [
     (182, 277),
     (183, 278),
@@ -410,6 +412,13 @@ def create_schema(conn: sqlite3.Connection):
             lava INTEGER NOT NULL DEFAULT 0,
             storm INTEGER NOT NULL DEFAULT 0,
             plasma INTEGER NOT NULL DEFAULT 0,
+            planets INTEGER NOT NULL DEFAULT 0,
+            moons INTEGER NOT NULL DEFAULT 0,
+            belts INTEGER NOT NULL DEFAULT 0,
+            securityClass TEXT,
+            radius REAL,
+            x2D REAL, y2D REAL,
+            spectralClass TEXT,
             PRIMARY KEY (region_id, constellation_id, solarsystem_id)
         );
 
@@ -1388,6 +1397,63 @@ def insert_types_dogma(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(skill_req_rows)} skill requirements")
 
 
+def _system_celestials(sde_dir: str) -> dict:
+    """
+    Per-system celestial counts from mapPlanets: planet types, planet/moon/belt totals.
+
+    Every planet row carries its `moonIDs` and `asteroidBeltIDs`, so this never touches
+    mapMoons.jsonl (224 MB) or mapAsteroidBelts.jsonl (22 MB).
+    """
+    planets_path = fsd_path(sde_dir, "mapPlanets.yaml")
+    if not os.path.exists(planets_path):
+        log("  SKIP celestial counts: mapPlanets not found")
+        return {}
+    counts: dict = {}
+    for entry in load_yaml_cached(planets_path).values():
+        sys_id = entry.get("solarSystemID")
+        if sys_id is None:
+            continue
+        bucket = counts.get(int(sys_id))
+        if bucket is None:
+            bucket = {col: 0 for col in PLANET_COUNT_COLUMNS}
+            bucket["planets"] = 0
+            bucket["moons"] = 0
+            bucket["belts"] = 0
+            counts[int(sys_id)] = bucket
+        bucket["planets"] += 1
+        bucket["moons"] += len(entry.get("moonIDs") or ())
+        bucket["belts"] += len(entry.get("asteroidBeltIDs") or ())
+        col = PLANET_TYPE_TO_COLUMN.get(entry.get("typeID"))
+        if col:
+            bucket[col] += 1
+    return counts
+
+
+def _system_stars(sde_dir: str) -> dict:
+    """solarSystemID -> (star typeID, spectral class) from mapStars."""
+    stars_path = fsd_path(sde_dir, "mapStars.yaml")
+    if not os.path.exists(stars_path):
+        return {}
+    stars = {}
+    for entry in load_yaml(stars_path).values():
+        sys_id = entry.get("solarSystemID")
+        if sys_id is None:
+            continue
+        stars[int(sys_id)] = (
+            entry.get("typeID") or 0,
+            (entry.get("statistics") or {}).get("spectralClass"),
+        )
+    return stars
+
+
+def _empty_celestials() -> dict:
+    bucket = {col: 0 for col in PLANET_COUNT_COLUMNS}
+    bucket["planets"] = 0
+    bucket["moons"] = 0
+    bucket["belts"] = 0
+    return bucket
+
+
 def _parse_system(args):
     sys_yaml_path, sys_name, region_id, const_id, is_jspace = args
     try:
@@ -1414,12 +1480,16 @@ def _parse_system(args):
             stargate_entries.append((int(gate_id), int(sys_id), int(dest_gate)))
 
     planets = sys_data.get("planets", {}) or {}
-    planet_counts = {col: 0 for col in ["temperate", "barren", "oceanic", "ice", "gas", "lava", "storm", "plasma"]}
+    planet_counts = {col: 0 for col in PLANET_COUNT_COLUMNS}
+    moon_count = 0
+    belt_count = 0
     celestial_rows = []
     for planet_id, planet_data in planets.items():
         col = PLANET_TYPE_TO_COLUMN.get(planet_data.get("typeID"))
         if col:
             planet_counts[col] += 1
+        moon_count += len(planet_data.get("moons", {}) or {})
+        belt_count += len(planet_data.get("asteroidBelts", {}) or {})
         cel_idx = planet_data.get("celestialIndex")
         if cel_idx is not None:
             planet_name = f"{sys_name} {_roman(int(cel_idx))}"
@@ -1438,6 +1508,9 @@ def _parse_system(args):
         planet_counts["oceanic"], planet_counts["ice"],
         planet_counts["gas"], planet_counts["lava"],
         planet_counts["storm"], planet_counts["plasma"],
+        len(planets), moon_count, belt_count,
+        sys_data.get("securityClass"), sys_data.get("radius"),
+        None, None, None,
     )
     return sys_row, univ_row, celestial_rows, stargate_entries
 
@@ -1488,49 +1561,43 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
             if rid:
                 const_to_region[int(const_id)] = int(rid)
 
-    systems_data = load_yaml(systems_path)
+    celestials = _system_celestials(sde_dir)
+    stars = _system_stars(sde_dir)
+    log(f"  celestial counts for {len(celestials)} systems, stars for {len(stars)}")
+
+    systems_data = load_yaml_cached(systems_path)
+    # Celestial names come from insert_celestial_names, which runs straight after this pass.
     celestial_rows = []
-    for sys_id, entry in systems_data.items():
+    for raw_sys_id, entry in systems_data.items():
+        sys_id = int(raw_sys_id)
         n = _localized_name(entry.get("name", ""))
-        sys_name = n[0] or ""
         sec = entry.get("securityStatus") or entry.get("security") or 0.0
-        sys_rows.append((int(sys_id), n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], sec))
+        sys_rows.append((sys_id, n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], sec))
 
         const_id = entry.get("constellationID", 0)
-        region_id = const_to_region.get(const_id, 0)
-        pos = entry.get("position", {})
-        x = pos.get("x", 0.0)
-        y = pos.get("y", 0.0)
-        z = pos.get("z", 0.0)
-        is_jspace = 1 if (n[0] or "").startswith("J") and any(c.isdigit() for c in (n[0] or "")) else 0
+        region_id = entry.get("regionID") or const_to_region.get(const_id, 0)
+        pos = entry.get("position") or {}
+        pos_2d = entry.get("position2D") or {}
+        star_type_id, spectral_class = stars.get(sys_id, (0, None))
+        counts = celestials.get(sys_id) or _empty_celestials()
+        name_en = n[0] or ""
+        is_jspace = 1 if name_en.startswith("J") and any(c.isdigit() for c in name_en) else 0
+
         univ_rows.append((
-            region_id, const_id, int(sys_id), sec, 0,
-            x, y, z,
-            0, 0, is_jspace, 0,
-            0, 0, 0, 0, 0, 0, 0, 0
+            region_id, const_id, sys_id, sec, star_type_id,
+            pos.get("x", 0.0), pos.get("y", 0.0), pos.get("z", 0.0),
+            0, 1 if entry.get("stargateIDs") else 0, is_jspace, 0,
+            counts["temperate"], counts["barren"], counts["oceanic"], counts["ice"],
+            counts["gas"], counts["lava"], counts["storm"], counts["plasma"],
+            counts["planets"], counts["moons"], counts["belts"],
+            entry.get("securityClass"), entry.get("radius"),
+            pos_2d.get("x"), pos_2d.get("y"), spectral_class,
         ))
-
-        stargates_map = entry.get("stargates", {}) or {}
-        has_gate = 1 if stargates_map else 0
-        if has_gate:
-            univ_rows[-1] = (
-                region_id, const_id, int(sys_id), sec, 0,
-                x, y, z,
-                0, has_gate, is_jspace, 0,
-                0, 0, 0, 0, 0, 0, 0, 0
-            )
-
-        planets = entry.get("planets", {}) or {}
-        for planet_id, planet_data in planets.items():
-            cel_idx = planet_data.get("celestialIndex")
-            if cel_idx is not None and sys_name:
-                planet_name = f"{sys_name} {_roman(int(cel_idx))}"
-                celestial_rows.append((int(planet_id), planet_name))
 
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
     conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
-    conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
+    conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
     conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?)", celestial_rows)
     conn.commit()
     log(f"  {len(region_rows)} regions, {len(const_rows)} constellations, {len(sys_rows)} solar systems, {len(celestial_rows)} celestials inserted")
@@ -1627,7 +1694,7 @@ def insert_universe(conn: sqlite3.Connection, sde_dir: str):
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
     conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
-    conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
+    conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
     conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?)", celestial_rows)
     conn.executemany("INSERT OR REPLACE INTO stargates VALUES (?,?)", stargate_rows)
     conn.commit()
