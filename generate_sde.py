@@ -56,6 +56,8 @@ PLANET_TYPE_TO_COLUMN = {
     2063: "plasma",  56022: "plasma",
 }
 
+WORMHOLE_REGION_ID_MIN = 11000000
+
 PLANET_COUNT_COLUMNS = ["temperate", "barren", "oceanic", "ice", "gas", "lava", "storm", "plasma"]
 
 SKILL_REQ_ATTR_PAIRS = [
@@ -1580,8 +1582,10 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
         pos_2d = entry.get("position2D") or {}
         star_type_id, spectral_class = stars.get(sys_id, (0, None))
         counts = celestials.get(sys_id) or _empty_celestials()
-        name_en = n[0] or ""
-        is_jspace = 1 if name_en.startswith("J") and any(c.isdigit() for c in name_en) else 0
+        # Wormhole space is a range of region ids. The old name test — starts with J and has a
+        # digit — called 69 real nullsec systems (JZ-B5Y, JDAS-0, JI1-SY) wormholes and dropped
+        # them from every jump query, while missing 338 systems that really are wormhole space.
+        is_jspace = 1 if region_id >= WORMHOLE_REGION_ID_MIN else 0
 
         univ_rows.append((
             region_id, const_id, sys_id, sec, star_type_id,
