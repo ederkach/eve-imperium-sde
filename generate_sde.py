@@ -502,7 +502,8 @@ def create_schema(conn: sqlite3.Connection):
             blueprintTypeName TEXT, blueprintTypeIcon TEXT,
             manufacturing_time INTEGER, research_material_time INTEGER,
             research_time_time INTEGER, copying_time INTEGER,
-            invention_time INTEGER, maxRunsPerCopy INTEGER
+            invention_time INTEGER, maxRunsPerCopy INTEGER,
+            reaction_time INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS blueprint_manufacturing_materials (
@@ -520,6 +521,27 @@ def create_schema(conn: sqlite3.Connection):
         );
 
         CREATE TABLE IF NOT EXISTS blueprint_manufacturing_skills (
+            blueprintTypeID INTEGER NOT NULL, blueprintTypeName TEXT,
+            blueprintTypeIcon TEXT, typeID INTEGER NOT NULL,
+            typeName TEXT, typeIcon TEXT, level INTEGER,
+            PRIMARY KEY (blueprintTypeID, typeID)
+        );
+
+        CREATE TABLE IF NOT EXISTS blueprint_reaction_materials (
+            blueprintTypeID INTEGER NOT NULL, blueprintTypeName TEXT,
+            blueprintTypeIcon TEXT, typeID INTEGER NOT NULL,
+            typeName TEXT, typeIcon TEXT, quantity INTEGER,
+            PRIMARY KEY (blueprintTypeID, typeID)
+        );
+
+        CREATE TABLE IF NOT EXISTS blueprint_reaction_output (
+            blueprintTypeID INTEGER NOT NULL, blueprintTypeName TEXT,
+            blueprintTypeIcon TEXT, typeID INTEGER NOT NULL,
+            typeName TEXT, typeIcon TEXT, quantity INTEGER,
+            PRIMARY KEY (blueprintTypeID, typeID)
+        );
+
+        CREATE TABLE IF NOT EXISTS blueprint_reaction_skills (
             blueprintTypeID INTEGER NOT NULL, blueprintTypeName TEXT,
             blueprintTypeIcon TEXT, typeID INTEGER NOT NULL,
             typeName TEXT, typeIcon TEXT, level INTEGER,
@@ -623,11 +645,12 @@ def create_schema(conn: sqlite3.Connection):
             itemName TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS facility_rig_effects (
-            id INTEGER NOT NULL,
-            category INTEGER NOT NULL,
+        CREATE TABLE IF NOT EXISTS industry_rig_targets (
+            rig_type_id INTEGER NOT NULL,
+            activity TEXT NOT NULL,
+            category_id INTEGER NOT NULL,
             group_id INTEGER NOT NULL,
-            PRIMARY KEY (id, category, group_id)
+            PRIMARY KEY (rig_type_id, activity, category_id, group_id)
         );
 
         CREATE TABLE IF NOT EXISTS marketGroups (
@@ -2134,6 +2157,33 @@ def insert_type_materials(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(rows)} typeMaterials rows")
 
 
+EVEREF_REFERENCE_URL = "https://data.everef.net/reference-data/reference-data-latest.tar.xz"
+
+
+def insert_rig_targets(conn: sqlite3.Connection, reference_tar):
+    import tarfile
+    path = reference_tar or "/tmp/everef-reference-data.tar.xz"
+    if not os.path.exists(path):
+        log(f"Downloading EVE Ref reference data -> {path}")
+        urllib.request.urlretrieve(EVEREF_REFERENCE_URL, path)
+    with tarfile.open(path, "r:xz") as tar:
+        types = json.load(tar.extractfile("types.json"))
+    rows = set()
+    for type_id, t in types.items():
+        rid = int(type_id)
+        for activity, ids in (t.get("engineering_rig_affected_category_ids") or {}).items():
+            for cid in ids:
+                rows.add((rid, activity, int(cid), 0))
+        for activity, ids in (t.get("engineering_rig_affected_group_ids") or {}).items():
+            for gid in ids:
+                rows.add((rid, activity, 0, int(gid)))
+        for activity in t.get("engineering_rig_global_activities") or []:
+            rows.add((rid, activity, 0, 0))
+    conn.executemany("INSERT OR REPLACE INTO industry_rig_targets VALUES (?,?,?,?)", sorted(rows))
+    conn.commit()
+    log(f"Inserted {len(rows)} rig target rows")
+
+
 def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
     path = fsd_path(sde_dir, "blueprints.yaml")
     if not os.path.exists(path):
@@ -2151,6 +2201,9 @@ def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
     mfg_mat_rows = []
     mfg_out_rows = []
     mfg_skill_rows = []
+    rxn_mat_rows = []
+    rxn_out_rows = []
+    rxn_skill_rows = []
     rm_mat_rows = []
     rm_skill_rows = []
     rt_mat_rows = []
@@ -2177,6 +2230,7 @@ def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
         max_runs = entry.get("maxProductionLimit")
 
         mfg = acts.get("manufacturing") or {}
+        rxn = acts.get("reaction") or {}
         rm = acts.get("research_material") or {}
         rt = acts.get("research_time") or {}
         copying = acts.get("copying") or {}
@@ -2186,6 +2240,7 @@ def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
             bp_id, bp_name, bp_icon,
             mfg.get("time"), rm.get("time"), rt.get("time"),
             copying.get("time"), invention.get("time"), max_runs,
+            rxn.get("time"),
         ))
 
         for mat in mfg.get("materials", []) or []:
@@ -2197,6 +2252,16 @@ def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
         for sk in mfg.get("skills", []) or []:
             tid = sk.get("typeID")
             mfg_skill_rows.append((bp_id, bp_name, bp_icon, tid, type_name(tid), type_icon(tid), sk.get("level")))
+
+        for mat in rxn.get("materials", []) or []:
+            tid = mat.get("typeID")
+            rxn_mat_rows.append((bp_id, bp_name, bp_icon, tid, type_name(tid), type_icon(tid), mat.get("quantity")))
+        for prod in rxn.get("products", []) or []:
+            tid = prod.get("typeID")
+            rxn_out_rows.append((bp_id, bp_name, bp_icon, tid, type_name(tid), type_icon(tid), prod.get("quantity")))
+        for sk in rxn.get("skills", []) or []:
+            tid = sk.get("typeID")
+            rxn_skill_rows.append((bp_id, bp_name, bp_icon, tid, type_name(tid), type_icon(tid), sk.get("level")))
 
         for mat in rm.get("materials", []) or []:
             tid = mat.get("typeID")
@@ -2229,7 +2294,10 @@ def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
             tid = sk.get("typeID")
             inv_skill_rows.append((bp_id, bp_name, bp_icon, tid, type_name(tid), type_icon(tid), sk.get("level")))
 
-    conn.executemany("INSERT OR REPLACE INTO blueprint_process_time VALUES (?,?,?,?,?,?,?,?,?)", process_rows)
+    conn.executemany("INSERT OR REPLACE INTO blueprint_process_time VALUES (?,?,?,?,?,?,?,?,?,?)", process_rows)
+    conn.executemany("INSERT OR REPLACE INTO blueprint_reaction_materials VALUES (?,?,?,?,?,?,?)", rxn_mat_rows)
+    conn.executemany("INSERT OR REPLACE INTO blueprint_reaction_output VALUES (?,?,?,?,?,?,?)", rxn_out_rows)
+    conn.executemany("INSERT OR REPLACE INTO blueprint_reaction_skills VALUES (?,?,?,?,?,?,?)", rxn_skill_rows)
     conn.executemany("INSERT OR REPLACE INTO blueprint_manufacturing_materials VALUES (?,?,?,?,?,?,?)", mfg_mat_rows)
     conn.executemany("INSERT OR REPLACE INTO blueprint_manufacturing_output VALUES (?,?,?,?,?,?,?)", mfg_out_rows)
     conn.executemany("INSERT OR REPLACE INTO blueprint_manufacturing_skills VALUES (?,?,?,?,?,?,?)", mfg_skill_rows)
@@ -2539,6 +2607,7 @@ def create_indexes(conn: sqlite3.Connection):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate item_db_en.sqlite from CCP SDE")
+    parser.add_argument("--everef-reference", help="Path to EVE Ref reference-data tar.xz (skip download)")
     parser.add_argument("--sde-zip", help="Path to sde.zip (skip download)")
     parser.add_argument("--sde-dir", help="Path to extracted sde/ dir (skip download+extract)")
     parser.add_argument("--out", default=DEFAULT_OUT, help=f"Output path (default: {DEFAULT_OUT})")
@@ -2627,6 +2696,7 @@ def main():
     insert_planet_schematics(conn, sde_dir)
     insert_type_materials(conn, sde_dir)
     insert_blueprints(conn, sde_dir)
+    insert_rig_targets(conn, args.everef_reference)
     insert_dynamic_items(conn, sde_dir)
     insert_ore_colors(conn)
     insert_version_info(conn, patch_number=args.patch)
