@@ -1652,6 +1652,25 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
         log(f"  {len(stargate_rows)} stargate connections, {len(systems_with_gates)} systems with gates")
 
 
+def apply_system_static(conn: sqlite3.Connection, path: str = None):
+    """Fill universe.iceFields and universe.jove from data/system_static.csv (HISA, MIT)."""
+    import csv
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "system_static.csv")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"system static data missing: {path}")
+    with open(path, newline="") as f:
+        rows = [(int(r["iceFieldCount"]), int(r["hasJoveObservatory"]), int(r["solarSystemID"]))
+                for r in csv.DictReader(f)]
+    # ponytail: added via ALTER (last column) because universe inserts are positional
+    if "iceFields" not in [r[1] for r in conn.execute("PRAGMA table_info(universe)")]:
+        conn.execute("ALTER TABLE universe ADD COLUMN iceFields INTEGER NOT NULL DEFAULT 0")
+    conn.executemany("UPDATE universe SET iceFields=?, jove=? WHERE solarsystem_id=?", rows)
+    conn.commit()
+    ice = conn.execute("SELECT COUNT(*) FROM universe WHERE iceFields>0").fetchone()[0]
+    jove = conn.execute("SELECT COALESCE(SUM(jove),0) FROM universe").fetchone()[0]
+    log(f"  system static: {len(rows)} csv rows, {ice} ice systems, {jove} jove systems")
+
+
 def insert_universe(conn: sqlite3.Connection, sde_dir: str):
     universe_root = os.path.join(sde_dir, "universe")
     if not os.path.exists(universe_root):
@@ -2686,6 +2705,7 @@ def main():
     insert_dogma_effects(conn, sde_dir)
     insert_types_dogma(conn, sde_dir)
     insert_universe(conn, sde_dir)
+    apply_system_static(conn)
     insert_celestial_names(conn, sde_dir)
     insert_stations(conn, sde_dir)
     drop_yaml_cache()
