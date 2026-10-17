@@ -320,7 +320,8 @@ def create_schema(conn: sqlite3.Connection):
             rig_slot INTEGER, gun_slot INTEGER, miss_slot INTEGER,
             variationParentTypeID INTEGER, process_size INTEGER,
             npc_ship_scene TEXT, npc_ship_faction TEXT,
-            npc_ship_type TEXT, npc_ship_faction_icon TEXT
+            npc_ship_type TEXT, npc_ship_faction_icon TEXT,
+            radius REAL
         );
 
         CREATE TABLE IF NOT EXISTS dogmaAttributeCategories (
@@ -915,18 +916,19 @@ def insert_types(conn: sqlite3.Connection, sde_dir: str, icon_filenames: dict = 
             entry.get("variationParentTypeID"),
             entry.get("portionSize"),
             None, None, None, None,
+            entry.get("radius"),
         ))
 
         if len(rows) >= 2000:
             conn.executemany(
-                "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 45) + ")",
+                "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 46) + ")",
                 rows
             )
             rows.clear()
 
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 45) + ")",
+            "INSERT OR REPLACE INTO types VALUES (" + ",".join(["?"] * 46) + ")",
             rows
         )
     conn.commit()
