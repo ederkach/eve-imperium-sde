@@ -649,6 +649,15 @@ def create_schema(conn: sqlite3.Connection):
             type_id INTEGER NOT NULL PRIMARY KEY,
             hex_color TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS alpha_skill_caps (
+            type_id INTEGER NOT NULL PRIMARY KEY,
+            max_level INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS alpha_ships (
+            type_id INTEGER NOT NULL PRIMARY KEY
+        );
     """)
     conn.commit()
 
@@ -2210,6 +2219,35 @@ def insert_dynamic_items(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(attr_rows)} attribute rows, {len(mapping_rows)} mapping rows")
 
 
+def insert_alpha(conn: sqlite3.Connection, sde_dir: str):
+    """alpha_skill_caps from CCP's cloneGrades; alpha_ships = published ships whose skill requirements all fit those caps."""
+    path = fsd_path(sde_dir, "cloneGrades.yaml")
+    if not os.path.exists(path):
+        log("cloneGrades not in this SDE, skipping alpha tables")
+        return
+    caps = {}
+    for grade in load_yaml(path).values():
+        for sk in grade.get("skills") or []:
+            tid, lvl = int(sk["typeID"]), int(sk["level"])
+            caps[tid] = max(caps.get(tid, 0), lvl)
+    bad = [(t, l) for t, l in caps.items() if not 1 <= l <= 5]
+    known = {r[0] for r in conn.execute("SELECT type_id FROM types")}
+    missing = [t for t in caps if t not in known]
+    if bad or missing or not caps:
+        raise SystemExit(f"alpha_skill_caps invalid: empty={not caps} bad_levels={bad[:5]} missing_types={missing[:5]}")
+    conn.executemany("INSERT INTO alpha_skill_caps VALUES (?,?)", sorted(caps.items()))
+    reqs = {}
+    for tid, skill, lvl in conn.execute("SELECT typeid, required_skill_id, required_skill_level FROM typeSkillRequirement"):
+        reqs.setdefault(tid, []).append((skill, lvl))
+    ships = sorted(
+        r[0] for r in conn.execute("SELECT type_id FROM types WHERE categoryID = 6 AND published = 1")
+        if all(caps.get(skill, 0) >= (lvl or 0) for skill, lvl in reqs.get(r[0], []))
+    )
+    conn.executemany("INSERT INTO alpha_ships VALUES (?)", [(t,) for t in ships])
+    conn.commit()
+    log(f"Inserted {len(caps)} alpha skill caps, {len(ships)} alpha ships")
+
+
 def insert_ore_colors(conn: sqlite3.Connection):
     log("Inserting ore_colors...")
     rows = [
@@ -2542,6 +2580,7 @@ def main():
     insert_blueprints(conn, sde_dir)
     insert_dynamic_items(conn, sde_dir)
     insert_ore_colors(conn)
+    insert_alpha(conn, sde_dir)
     insert_version_info(conn, patch_number=args.patch)
 
     if args.fetch_descriptions:
