@@ -1,0 +1,7 @@
+item_db_en.sqlite
+__pycache__/
+*.pyc
+.DS_Store
+*.sqlite
+*.zip
+icons/

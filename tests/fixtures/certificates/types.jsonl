@@ -1,0 +1,4 @@
+{"_key": 587, "groupID": 25, "name": {"en": "Rifter", "ru": "Rifter", "zh": "裂谷级"}, "published": true, "raceID": 1, "factionID": 500001}
+{"_key": 3300, "groupID": 255, "name": {"en": "Gunnery", "ru": "Стрельба из турелей", "zh": "射击学"}, "published": true}
+{"_key": 3303, "groupID": 255, "name": {"en": "Small Energy Turret", "ru": "Малые лазерные орудия", "zh": "小型能量炮台操作"}, "published": true}
+{"_key": 3426, "groupID": 1210, "name": {"en": "CPU Management", "ru": "Управление ЦП", "zh": "CPU管理"}, "published": true}

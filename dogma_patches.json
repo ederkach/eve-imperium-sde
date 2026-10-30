@@ -1,0 +1,42 @@
+{
+  "_format": "effect name -> list of [domain, func, modifiedAttributeID, modifyingAttributeID, operation, skillTypeID?]; replaces CCP modifierInfo",
+  "selfRof": [["shipID", "LocationRequiredSkillModifier", 51, 293, 6, -1]],
+  "droneDmgBonus": [["shipID", "OwnerRequiredSkillModifier", 64, 292, 6, -1]],
+  "microJumpDrive": [["shipID", "ItemModifier", 552, 973, 6]],
+  "moduleBonusMicrowarpdrive": [
+    ["shipID", "ItemModifier", 552, 554, 6],
+    ["shipID", "ItemModifier", 4, 796, 2]
+  ],
+  "moduleBonusAfterburner": [["shipID", "ItemModifier", 4, 796, 2]],
+  "adaptiveArmorHardener": [
+    ["shipID", "ItemModifier", 267, 267, 0],
+    ["shipID", "ItemModifier", 268, 268, 0],
+    ["shipID", "ItemModifier", 269, 269, 0],
+    ["shipID", "ItemModifier", 270, 270, 0]
+  ],
+  "hardPointModifierEffect": [
+    ["shipID", "ItemModifier", 101, 1369, 2],
+    ["shipID", "ItemModifier", 102, 1368, 2]
+  ],
+  "slotModifier": [
+    ["shipID", "ItemModifier", 14, 1374, 2],
+    ["shipID", "ItemModifier", 13, 1375, 2],
+    ["shipID", "ItemModifier", 12, 1376, 2]
+  ],
+  "missileEMDmgBonus": [["charID", "OwnerRequiredSkillModifier", 114, 292, 6, -1]],
+  "missileExplosiveDmgBonus": [["charID", "OwnerRequiredSkillModifier", 116, 292, 6, -1]],
+  "missileKineticDmgBonus2": [["charID", "OwnerRequiredSkillModifier", 117, 292, 6, -1]],
+  "missileThermalDmgBonus": [["charID", "OwnerRequiredSkillModifier", 118, 292, 6, -1]],
+  "missileDMGBonus": [
+    ["shipID", "LocationRequiredSkillModifier", 114, 213, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 116, 213, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 117, 213, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 118, 213, 4, 3319]
+  ],
+  "missileDMGBonusPassive": [
+    ["shipID", "LocationRequiredSkillModifier", 114, 213, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 116, 213, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 117, 213, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 118, 213, 4, 3319]
+  ]
+}
