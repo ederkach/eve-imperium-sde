@@ -25,6 +25,7 @@ import pickle
 import sqlite3
 import sys
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -262,6 +263,23 @@ def esi_get(url: str):
             return json.loads(r.read())
     except Exception:
         return None
+
+
+def esi_get_page(url: str):
+    """(json, headers) with backoff on 429/5xx; None when ESI keeps failing."""
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "eve-imperium/sde-generator"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read()), r.headers
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            wait = int(e.headers.get("Retry-After", 0) or 0) if e.code == 429 else 0
+            time.sleep(max(wait, 2 ** attempt))
+        except Exception:
+            time.sleep(2 ** attempt)
+    return None
 
 
 def create_schema(conn: sqlite3.Connection):
@@ -506,6 +524,16 @@ def create_schema(conn: sqlite3.Connection):
             research_time_time INTEGER, copying_time INTEGER,
             invention_time INTEGER, maxRunsPerCopy INTEGER,
             reaction_time INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS blueprint_sources (
+            type_id INTEGER PRIMARY KEY,
+            npc_seeded INTEGER NOT NULL,
+            seed_price REAL,
+            seed_region_ids TEXT,
+            lp_offer INTEGER NOT NULL,
+            is_copy_only INTEGER NOT NULL,
+            snapshot_utc TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS blueprint_manufacturing_materials (
@@ -2439,6 +2467,56 @@ def insert_blueprints(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(process_rows)} blueprints processed")
 
 
+BLUEPRINT_SEED_REGIONS = (10000002, 10000043, 10000032, 10000030, 10000042)
+NPC_STATION_MAX_ID = 70_000_000
+NPC_ORDER_MIN_DURATION = 90
+COPY_ONLY_META_GROUPS = (2, 14)
+
+
+def fetch_blueprint_seeds(blueprint_ids, fetch=esi_get_page, regions=BLUEPRINT_SEED_REGIONS):
+    """{type_id: (lowest_price, [region_ids])} for NPC sell orders; a failing region is skipped."""
+    seeds = {}
+    for region in regions:
+        page, pages, found = 1, 1, 0
+        while page <= pages:
+            res = fetch(f"{ESI_BASE}/markets/{region}/orders/?order_type=sell&page={page}")
+            if res is None:
+                log(f"  region {region}: page {page} failed, skipping the rest of this region")
+                break
+            data, headers = res
+            pages = int(headers.get("X-Pages", 1) or 1)
+            for o in data:
+                if (o["type_id"] in blueprint_ids and o["location_id"] < NPC_STATION_MAX_ID
+                        and o.get("duration", 0) >= NPC_ORDER_MIN_DURATION):
+                    found += 1
+                    price, regs = seeds.get(o["type_id"], (o["price"], []))
+                    if region not in regs:
+                        regs.append(region)
+                    seeds[o["type_id"]] = (min(price, o["price"]), regs)
+            page += 1
+        log(f"  region {region}: {pages} pages, {found} NPC blueprint orders")
+    return seeds
+
+
+def insert_blueprint_sources(conn: sqlite3.Connection, fetch_seeds: bool = True, fetch=esi_get_page):
+    log("Inserting blueprint_sources...")
+    rows = conn.execute(
+        "SELECT o.blueprintTypeID, t.metaGroupID FROM blueprint_manufacturing_output o "
+        "LEFT JOIN types t ON t.type_id = o.typeID GROUP BY o.blueprintTypeID").fetchall()
+    ids = {r[0] for r in rows}
+    seeds = fetch_blueprint_seeds(ids, fetch) if fetch_seeds else {}
+    lp = {r[0] for r in conn.execute("SELECT DISTINCT type_id FROM loyalty_offer_outputs")}
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    out = []
+    for bp, meta in rows:
+        price, regs = seeds.get(bp, (None, None))
+        out.append((bp, int(bp in seeds), price, ",".join(map(str, regs)) if regs else None,
+                    int(bp in lp), int(meta in COPY_ONLY_META_GROUPS), now))
+    conn.executemany("INSERT OR REPLACE INTO blueprint_sources VALUES (?,?,?,?,?,?,?)", out)
+    conn.commit()
+    log(f"  {len(out)} blueprint sources, {len(seeds)} NPC-seeded")
+
+
 def insert_dynamic_items(conn: sqlite3.Connection, sde_dir: str):
     path = fsd_path(sde_dir, "dynamicitemattributes.yaml", "dynamicItemAttributes.yaml")
     if not os.path.exists(path):
@@ -2806,6 +2884,10 @@ def main():
     parser.add_argument("--workers", type=int, default=30, help="Worker threads for ESI fetching")
     parser.add_argument("--patch", type=int, default=int(os.environ.get("SDE_PATCH", "0")),
                         help="Patch number for this regeneration (bumps when we ship fixes on the same CCP build)")
+    parser.add_argument("--blueprint-sources", dest="blueprint_sources", action="store_true", default=True,
+                        help="Fetch NPC blueprint seeding from ESI market orders (default on)")
+    parser.add_argument("--skip-blueprint-sources", dest="blueprint_sources", action="store_false",
+                        help="Skip the ESI NPC-seed scan; blueprint_sources gets npc_seeded=0 everywhere")
     args = parser.parse_args()
 
     sde_dir = args.sde_dir
@@ -2887,6 +2969,7 @@ def main():
     insert_planet_schematics(conn, sde_dir)
     insert_type_materials(conn, sde_dir)
     insert_blueprints(conn, sde_dir)
+    insert_blueprint_sources(conn, args.blueprint_sources)
     insert_rig_targets(conn, args.everef_reference)
     insert_dynamic_items(conn, sde_dir)
     insert_ore_colors(conn)
