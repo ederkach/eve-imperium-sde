@@ -83,7 +83,7 @@ class DogmaPatchTest(unittest.TestCase):
 
     def test_shipped_file(self):
         patches = g.load_dogma_patches()
-        self.assertEqual(len(patches), 14)
+        self.assertEqual(len(patches), 15)
         self.assertEqual(json.loads(patches["selfRof"]), [{
             "domain": "shipID", "func": "LocationRequiredSkillModifier", "modifiedAttributeID": 51,
             "modifyingAttributeID": 293, "operation": 6, "skillTypeID": -1}])

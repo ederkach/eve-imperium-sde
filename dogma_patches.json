@@ -38,5 +38,11 @@
     ["shipID", "LocationRequiredSkillModifier", 116, 213, 4, 3319],
     ["shipID", "LocationRequiredSkillModifier", 117, 213, 4, 3319],
     ["shipID", "LocationRequiredSkillModifier", 118, 213, 4, 3319]
+  ],
+  "synchronizerRigMissileDMGBonusPreMulPassive": [
+    ["shipID", "LocationRequiredSkillModifier", 114, 6530, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 116, 6530, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 117, 6530, 4, 3319],
+    ["shipID", "LocationRequiredSkillModifier", 118, 6530, 4, 3319]
   ]
 }
