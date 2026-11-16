@@ -45,17 +45,9 @@ jobs:
         id: date
         run: echo "week=$(date +%Y-%W)" >> $GITHUB_OUTPUT
 
-      - name: Cache SDE download
-        uses: actions/cache@v4
-        id: sde-cache
-        with:
-          path: /tmp/sde.zip
-          key: sde-jsonl-${{ steps.date.outputs.week }}
-
       - name: Download SDE
-        if: steps.sde-cache.outputs.cache-hit != 'true'
         run: |
-          curl -L -o /tmp/sde.zip \
+          curl -fL -o /tmp/sde.zip \
             https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip
 
       - name: Probe CCP build & determine patch
