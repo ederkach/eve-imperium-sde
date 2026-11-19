@@ -441,6 +441,8 @@ def create_schema(conn: sqlite3.Connection):
             radius REAL,
             x2D REAL, y2D REAL,
             spectralClass TEXT,
+            wormhole_class INTEGER,
+            effect_type_id INTEGER,
             PRIMARY KEY (region_id, constellation_id, solarsystem_id)
         );
 
@@ -1612,6 +1614,24 @@ def _system_stars(sde_dir: str) -> dict:
     return stars
 
 
+def _first_not_none(*values):
+    return next((v for v in values if v is not None), None)
+
+
+def _system_effects(sde_dir: str) -> dict:
+    """solarSystemID -> effect beacon typeID from mapSecondarySuns."""
+    path = fsd_path(sde_dir, "mapSecondarySuns.yaml")
+    if not os.path.exists(path):
+        return {}
+    effects = {}
+    for entry in load_yaml(path).values():
+        sys_id = entry.get("solarSystemID")
+        beacon = entry.get("effectBeaconTypeID")
+        if sys_id is not None and beacon:
+            effects[int(sys_id)] = int(beacon)
+    return effects
+
+
 def _empty_celestials() -> dict:
     bucket = {col: 0 for col in PLANET_COUNT_COLUMNS}
     bucket["planets"] = 0
@@ -1711,12 +1731,16 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
 
     sys_to_const = {}
     const_to_region = {}
+    region_wh_class = {}
+    const_wh_class = {}
 
     if os.path.exists(regions_path):
         regions_data = load_yaml(regions_path)
         for region_id, entry in regions_data.items():
             n = _localized_name(entry.get("name", ""))
             region_rows.append((int(region_id), n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8]))
+            if entry.get("wormholeClassID") is not None:
+                region_wh_class[int(region_id)] = int(entry["wormholeClassID"])
 
     if os.path.exists(consts_path):
         consts_data = load_yaml(consts_path)
@@ -1726,9 +1750,12 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
             rid = entry.get("regionID")
             if rid:
                 const_to_region[int(const_id)] = int(rid)
+            if entry.get("wormholeClassID") is not None:
+                const_wh_class[int(const_id)] = int(entry["wormholeClassID"])
 
     celestials = _system_celestials(sde_dir)
     stars = _system_stars(sde_dir)
+    effects = _system_effects(sde_dir)
     log(f"  celestial counts for {len(celestials)} systems, stars for {len(stars)}")
 
     systems_data = load_yaml_cached(systems_path)
@@ -1760,12 +1787,14 @@ def _insert_universe_from_map_files(conn: sqlite3.Connection, sde_dir: str):
             counts["planets"], counts["moons"], counts["belts"],
             entry.get("securityClass"), entry.get("radius"),
             pos_2d.get("x"), pos_2d.get("y"), spectral_class,
+            _first_not_none(entry.get("wormholeClassID"), const_wh_class.get(const_id), region_wh_class.get(region_id)),
+            effects.get(sys_id),
         ))
 
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
     conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
-    conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
+    conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
     conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?,?,?)", celestial_rows)
     conn.commit()
     log(f"  {len(region_rows)} regions, {len(const_rows)} constellations, {len(sys_rows)} solar systems, {len(celestial_rows)} celestials inserted")
@@ -1862,7 +1891,7 @@ def insert_universe(conn: sqlite3.Connection, sde_dir: str):
     conn.executemany("INSERT OR REPLACE INTO regions VALUES (?,?,?,?,?,?,?,?,?,?)", region_rows)
     conn.executemany("INSERT OR REPLACE INTO constellations VALUES (?,?,?,?,?,?,?,?,?,?)", const_rows)
     conn.executemany("INSERT OR REPLACE INTO solarsystems VALUES (?,?,?,?,?,?,?,?,?,?,?)", sys_rows)
-    conn.executemany("INSERT OR REPLACE INTO universe VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
+    conn.executemany("INSERT OR REPLACE INTO universe (region_id,constellation_id,solarsystem_id,system_security,system_type,x,y,z,hasStation,hasJumpGate,isJSpace,jove,temperate,barren,oceanic,ice,gas,lava,storm,plasma,planets,moons,belts,securityClass,radius,x2D,y2D,spectralClass) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", univ_rows)
     conn.executemany("INSERT OR REPLACE INTO celestialNames VALUES (?,?,?,?)", celestial_rows)
     conn.executemany("INSERT OR REPLACE INTO stargates VALUES (?,?)", stargate_rows)
     conn.commit()
