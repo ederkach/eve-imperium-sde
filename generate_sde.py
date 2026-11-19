@@ -497,6 +497,11 @@ def create_schema(conn: sqlite3.Connection):
             output_value INTEGER, input_typeid TEXT, input_value TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS planetResources (
+            planetID INTEGER PRIMARY KEY, reagentTypeID INTEGER, reagentHarvestAmount INTEGER,
+            cycleMinutes INTEGER, power INTEGER, workforce INTEGER
+        );
+
         CREATE TABLE IF NOT EXISTS loyalty_offers (
             corporation_id INTEGER NOT NULL,
             offer_id INTEGER NOT NULL,
@@ -2273,6 +2278,27 @@ def insert_planet_schematics(conn: sqlite3.Connection, sde_dir: str):
     log(f"  {len(rows)} planetSchematics")
 
 
+def insert_planet_resources(conn: sqlite3.Connection, sde_dir: str):
+    path = fsd_path(sde_dir, "planetResources.yaml")
+    if not os.path.exists(path):
+        return
+    log("Inserting planetResources...")
+    data = load_yaml(path)
+    rows = []
+    for planet_id, entry in data.items():
+        reagent = entry.get("reagent")
+        if not reagent or reagent.get("type_id") is None:
+            continue
+        rows.append((
+            int(planet_id), int(reagent["type_id"]), int(reagent.get("amount_per_cycle") or 0),
+            int(reagent.get("cycle_period") or 0) // 60,
+            int(entry.get("power") or 0), int(entry.get("workforce") or 0),
+        ))
+    conn.executemany("INSERT OR REPLACE INTO planetResources VALUES (?,?,?,?,?,?)", rows)
+    conn.commit()
+    log(f"  {len(rows)} planetResources")
+
+
 def insert_type_materials(conn: sqlite3.Connection, sde_dir: str):
     path = fsd_path(sde_dir, "typeMaterials.yaml")
     if not os.path.exists(path):
@@ -2967,6 +2993,7 @@ def main():
     insert_agents(conn, sde_dir)
     insert_divisions(conn, sde_dir)
     insert_planet_schematics(conn, sde_dir)
+    insert_planet_resources(conn, sde_dir)
     insert_type_materials(conn, sde_dir)
     insert_blueprints(conn, sde_dir)
     insert_blueprint_sources(conn, args.blueprint_sources)
